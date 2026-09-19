@@ -108,6 +108,9 @@ public class Robot {
         if (fused != null) fused.update();
         else if (drive.getLocalizer() != null) drive.getLocalizer().update();
         intake.update();
+        // The magazine stays loaded against the gate while the wheel is spinning, so the
+        // next shot is a gate pulse and not a climb from the bin.
+        transfer.setBeltOn(flywheel.gate().getTargetRpm() > 0);
         transfer.update();
         turret.update();
         hood.update();

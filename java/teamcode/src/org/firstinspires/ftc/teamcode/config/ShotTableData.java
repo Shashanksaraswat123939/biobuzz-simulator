@@ -25,8 +25,8 @@ public final class ShotTableData {
 
     // MEASURED score -> frequency mapping from config/landcal.json (tools/landcal.ts).
     // Without it the threshold is a score with a percent sign on it.
-    public static final double[] CAL_SCORE    = { 0.606927, 0.835775, 0.910059, 0.926285, 0.934331, 0.965747, 0.977633, 0.994822, 0.998211 };
-    public static final double[] CAL_OBSERVED = { 0.911392, 0.911392, 0.911392, 0.911392, 0.911392, 0.936709, 0.936709, 0.936709, 0.936709 };
+    public static final double[] CAL_SCORE    = { 0.397806, 0.506242, 0.516873, 0.533798, 0.558037, 0.572976, 0.591209, 0.683693, 0.750630, 0.810600 };
+    public static final double[] CAL_OBSERVED = { 0.839506, 0.839506, 0.839506, 0.839506, 0.839506, 0.839506, 0.864198, 0.950617, 1.000000, 1.000000 };
     /** The best frequency any bin of shots actually achieved. No threshold above this can be met. */
-    public static final double CAL_CEILING = 0.936709;
+    public static final double CAL_CEILING = 1.000000;
 }

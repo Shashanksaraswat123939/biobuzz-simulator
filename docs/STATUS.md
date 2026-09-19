@@ -4,7 +4,7 @@ Everything below is measured, by a named tool, at the commit it says. No number 
 estimated, and where a number is bad it is written down as bad. Re-run the tool to check any
 of it — that is the point of naming them.
 
-Last measured: 19 September 2026. 168 TypeScript tests pass, 51 Java self-check assertions
+Last measured: 19 September 2026. 169 TypeScript tests pass, 52 Java self-check assertions
 pass, the site builds.
 
 ---
@@ -37,7 +37,9 @@ live slider in the **Variables** tab.
 
 | balls | in | accuracy | time per ball |
 |---|---|---|---|
-| 88 | 84 | **95%** | **1.41 s** |
+| 91 | 87 | **96%** | **1.09 s** |
+
+(Was 95% at 1.41 s. The feed used to waste a third of its pulses; see section 4.)
 
 Grey squares fired 0 balls, correctly.
 
@@ -64,24 +66,94 @@ Grey squares fired 0 balls, correctly.
 
 ### Driving and shooting
 
-`tools/fastfire.ts --untiltip` — whole patrol, 104–129 balls a row, before the HIVE tips
+`tools/fastfire.ts --untiltip --seeds 3` — 40 in stand-off, each seed until the HIVE tips
 
-| stand-off | speed | balls | in | accuracy | time per ball | gate open |
+| speed | balls | in | accuracy | time per ball IN | gate open | was (time per ball) |
 |---|---|---|---|---|---|---|
-| 40 in | 0.47 m/s | 129 | 96 | 74% | 1.01 s | 89% |
-| **40 in** | **0.73 m/s** | 114 | 94 | **82%** | **1.15 s** | 84% |
-| 40 in | 0.94 m/s | 116 | 87 | 75% | 1.34 s | 76% |
-| 46 in | 0.57 m/s | 111 | 88 | 79% | 1.59 s | 77% |
-| 52 in | 0.51 m/s | 109 | 88 | 81% | 1.59 s | 75% |
-| 52 in | 0.65 m/s | 104 | 88 | 85% | 2.41 s | 67% |
+| standing | 32 | 32 | 100% | 1.53 s | 47% | — |
+| 0.39 m/s | 48 | 36 | 75% | **0.80 s** | 89% | 1.01 s |
+| 0.60 m/s | 49 | 34 | 69% | 0.86 s | 85% | — |
+| 0.78 m/s | 48 | 34 | 71% | 0.97 s | 81% | 1.15 s |
+| 0.99 m/s | 53 | 36 | 68% | 1.08 s | 70% | 1.34 s |
 
-**Best operating point: 40 in, 0.73 m/s.** Driving faster than that is worse on both counts.
+Every row scores more per second than before. The land rate on the move is lower than the
+82% this table used to show at 0.73 m/s, and the per-shot record says why (`tools/releasecheck.ts
+--dump`): in every seed the first ten or eleven balls land and the last two or three before the
+tip miss, whatever the angle. The pocket is full and the pile rejects the arrival. Standing
+still the same pile does not — 100% — so the moving shots arrive somewhere the standing ones
+do not. That is the open accuracy question, and section 4 has the one number that moves it.
+
+### The mathematical maximum, and whether the robot reaches it
+
+`tools/releasecheck.ts --emptycell` benches every ball once it settles in the CELL, so the
+pocket never fills: the moving robot measured against the same empty-pocket ceiling
+`tools/ceiling.ts` computes for a standing one. `--minshots 200` keeps adding seeds until the
+sample is the same size at every speed, so no row is a tighter number than its neighbour.
+
+**Every speed, 40 in stand-off, 1699 balls in total.** The model's ceiling here is 88%.
+
+| asked | actual | balls | accuracy | ball to ball | commit → release |
+|---|---|---|---|---|---|
+| standing | 0.00 m/s | 264 | **98%** | 0.60 s | 0.13 s |
+| 0.25 m/s | 0.14 m/s | 264 | **95%** | 0.60 s | 0.13 s |
+| 0.50 m/s | 0.39 m/s | 258 | **98%** | 0.61 s | 0.14 s |
+| 0.75 m/s | 0.60 m/s | 247 | **96%** | 0.64 s | 0.14 s |
+| 1.00 m/s | 0.79 m/s | 229 | **98%** | 0.68 s | 0.14 s |
+| 1.25 m/s | 0.95 m/s | 226 | **92%** | 0.70 s | 0.14 s |
+| 1.50 m/s | 1.00 m/s | 211 | **92%** | 0.74 s | 0.14 s |
+
+**The aim is at or above its ceiling at every speed the robot can reach.** Motion costs
+nothing the sample can resolve until about 0.95 m/s, where the group starts to widen
+(±17 cm long against ±8 at rest) and accuracy gives up six points. The robot beats the model's
+own 40 in figure because the entry model's stay rate is pessimistic there.
+
+**Asked is not actual past 1 m/s.** The patrol tops out at 1.00 m/s however hard it is pushed:
+the arc at 40 in is too tight to accelerate round and a mecanum takes half a second to reverse.
+Anything above that is a number about the drivetrain, not the shooter.
+
+With scatter off the group is centred to within a centimetre at both ranges (`rangeTrim_in` is
+4.0; it was 2.0 and the group sat 5–7 cm long).
+
+### The delay between shots
+
+Three different numbers, and only the last is the one a driver feels:
+
+| | |
+|---|---|
+| commit → release | **0.13–0.14 s** — the gate servo reaching half travel plus the belt lifting the staged ball into the wheel |
+| ball to ball, gate open | **0.60 s exactly** — `transfer.cycleTime_s`, the mechanism's floor. Standing at 30° off the opening, 260 of 260 gaps were one cycle |
+| ball to ball, in the patrol | 0.60 s median at every speed; the **mean** climbs 0.60 → 0.74 s from standing to 1.0 m/s |
+
+The mean climbs because a refused cycle costs a whole 0.6 s, not a fraction: the histogram is
+one cycle or two cycles and almost nothing else (at 1.0 m/s, 195 gaps of one against 30 of
+two). What refuses them is the reversal at the end of each pass, where the turret is slewing
+and the yaw cap is over.
+
+**Everything lost on the move is the pile.** Standing still at 40 in with the pocket filling,
+firing until the tip: 67% from 5° off the opening, 71% from 25°, 75% from 45°. Same loss as
+the moving rows above it, at any bearing. What does move it is range — the stay rate climbs
+from 86% at 30–42 in to 95% at 54 and 99% at 78, and `tools/landrate.ts` lands 12 of 12 at
+both 55 and 70 in at the 0.61 s mechanism floor — so **the robot's own ranging now drives to
+the landing-ceiling band (58 in and out) instead of the widest-margin band (30–38 in)**, in
+both brains (`ShotTable.bestBand` / `ShotTable.bestRange`).
+
+The cycle time does not change the land rate (`--cycle` 0.6 / 0.8 / 1.0 at 0.60 m/s: 73 / 72 /
+75% at 0.91 / 1.22 / 1.39 s per ball in), so it stays at the mechanism's 0.6 s.
+
+**Best operating point: 40 in, 0.4–0.8 m/s.** Faster than that the reversals and the yaw cap
+hold the gate shut a fifth of the time.
 
 ### Autonomous
 
 `tools/autocheck.ts` — 5 runs
 
 4.2 balls fired, 3.6 in (**86%**), LEAVE 5/5, PARK 5/5, 8 points.
+
+The Java `Auto One Tip` in lockstep: LEAVE + PARK, 8 points, and now keeps its preloads and
+spins up — it used to run the belt only during the feed pulse and the intake only on a trigger,
+so the stop after LEAVE threw all four balls out of the mouth. It still fires nothing, because
+it parks 62° off the CELL's opening where the turret camera cannot decode the tag. The routine
+has to drive round, as `autoRoutine.ts` does.
 
 ---
 
@@ -192,8 +264,38 @@ is measuring a robot standing on the wrong side of a turned-over goal.
   there (1.4–2.1 m/s) is no greater than the chassis, so the launch would have to go nearly
   straight up, past the hood's 80° stop. It fires fine from 60 in out.
 
+### The feed was racing itself — FIXED
+
+`tools/releasecheck.ts` (new) records every shot at the moment the brain commits it and the
+moment the ball leaves. On the 40 in patrol at 1 m/s the delay between the two was 0.13 s or
+0.38 s and nothing in between, and **13 of 41 pulses released nothing** — 107 of 118 standing
+still — each one a wasted 0.6 s cycle. `tools/feedprobe.ts` (new) shows the tube frame by frame:
+the world ran a cycle clock of its own from the previous *release* while the brain runs the
+same 0.6 s from the previous *commit*, the nip refused a ball once the servo was back through
+half travel, and the plate re-closed on a timer inside whichever ball was straddling it. The
+release is now a latch (one pulse, one ball, whatever the servo does after), the plate waits
+for the ball, and the belt holds the column single file because a plate that waits let four
+balls arch corner to corner across the square bore and jam for 30 s. Every pulse now fires one
+ball 0.12 s after the commit with a ball staged (`tests/shoot.test.ts` pins it).
+
+The aim was never the problem: `tools/shoterror.ts` puts every driving case at ±8–10 cm long
+and ±3–5 cm wide at 50 in, and with scatter off the ball crosses the mouth within ±6 cm.
+
+### What still misses on the move: a full pocket
+
+The last two or three balls before a tip land 40–60%. `ball.e_ball`, the ball-to-ball
+restitution, is a **guess** at 0.8 and is what decides whether an arrival clips the pile and
+comes back out: on the same seeds with scatter off, 66% at 0.8, 73% at 0.5, 79% at 0.3
+(`releasecheck --eball`). That is the number to measure on a real ball before anything in the
+aim is touched.
+
 ### Smaller, known, measured
 
+- **There is no flatter shot to lead with.** `tools/flatbranch.ts`: the shipped table already
+  returns the flattest arc that threads at every range. The ball's horizontal at 40–50 in is
+  1.8–2.1 m/s, so sideways motion past about 1.2 m/s cannot be led under the 45° cap, and past
+  about 1 m/s the lead puts the tag outside the turret camera's 30° half-lens. Fast shooting
+  from 40 in has to be radial, or from 60 in out.
 - **First shot after arming costs 5.8 s** — the belt only runs once the flywheel is on, so the
   tube primes from cold. Arm early and it is free.
 - **The camera cannot read the tag past 65° of incidence**, and the tag rides the rocker.

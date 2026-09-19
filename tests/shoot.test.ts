@@ -122,6 +122,50 @@ describe('shooting (PLAN.md phases 4-5)', () => {
     }
   }, 30000);
 
+  it('every feed pulse releases exactly one ball, promptly', () => {
+    // The world used to run a second cycle clock of its own, phase-locked to the previous
+    // RELEASE while the brain's is locked to the previous COMMIT, and to refuse the nip once
+    // the servo was back through half travel. A third of the pulses released nothing and the
+    // delay was 0.13 s or 0.38 s by frame quantisation (docs/DECISIONS.md 2026-09-19).
+    //
+    // Counted from the FIRST release: the tube primes from cold for a couple of seconds after
+    // arming, and the brain has no sensor that tells it the magazine is still empty, so the
+    // pulses it spends before the first ball reaches the wheel are the known priming cost
+    // (docs/STATUS.md), not the race this test is about.
+    const { world, brain } = rig(60, 4, 20);
+    spinUp(world, brain);
+    const fire = emptyGamepad();
+    fire.right_bumper = true;
+    let pulses = 0;
+    let wasPulsing = false;
+    let lastCommit = -1;
+    let primed = false;
+    const delays: number[] = [];
+    let lastShots = world.robot.shots;
+    for (let f = 0; f < 60 * 10; f++) {
+      // Keep the bin topped up so an empty hopper cannot be mistaken for a wasted pulse.
+      for (const b of world.balls.balls) {
+        if (world.robot.heldBalls().length >= 4) break;
+        if (!b.body.isEnabled()) world.robot.preload(world.balls, b);
+      }
+      world.setGamepads(fire, emptyGamepad());
+      world.step(brain.update(world.sensors(), fire, world.seq));
+      if (brain.state.pulsing && !wasPulsing) {
+        lastCommit = brain.state.lastFeedT;
+        if (primed) pulses++;
+      }
+      wasPulsing = brain.state.pulsing;
+      if (world.robot.shots > lastShots) {
+        lastShots = world.robot.shots;
+        if (primed) delays.push(world.t - lastCommit);
+        primed = true;
+      }
+    }
+    expect(pulses).toBeGreaterThanOrEqual(6);
+    expect(delays.length).toBe(pulses);
+    for (const d of delays) expect(d).toBeLessThan(0.3);
+  }, 30000);
+
   it('the flywheel dips when a ball is fired and recovers', () => {
     const { world, brain } = rig(75);
     spinUp(world, brain);
@@ -181,6 +225,10 @@ describe('shooting (PLAN.md phases 4-5)', () => {
     expect(table.rows.length).toBeGreaterThan(20);
     const [lo, hi] = table.bestBand();
     expect(hi).toBeGreaterThanOrEqual(lo);
+    // The band is ranked by landing ceiling, not speed margin: the close rows thread with the
+    // widest margin and bounce out the most (tools/ceiling.ts), so the band must start where
+    // the stay rate has climbed, not at the table's floor.
+    expect(lo).toBeGreaterThanOrEqual(54);
     expect(table.lookup(90).rpm).toBeGreaterThan(1000);
     expect(table.lookup(90).margin).toBeGreaterThan(0.02);
     void M_TO_IN;

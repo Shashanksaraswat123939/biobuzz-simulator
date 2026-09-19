@@ -1967,3 +1967,178 @@ Who/where:   tools/zonerun.ts, tools/bandcheck.ts (new), packages/core/src/robot
              packages/core/src/physics/world.ts (tip credit), config/robot.json
              (fireLeadCap_deg, rangeLead_s, cycleTime_s notes), config/params.json
              (lipClearanceFrac), tools/shottable.ts / hoodtable.ts / shotzone.ts (clearance)
+
+## 2026-09-19 — The feed was racing itself: a third of the pulses fired nothing, and the delay was a coin flip
+
+Plan said:   "Move at high speed, aim perfectly, shoot every time." The complaint from the driver
+             was that sometimes the timing was wrong, sometimes the accuracy, sometimes the
+             movement, and that the readiness check ought to account for the time a shot takes
+             to leave.
+
+Found:       THE AIM WAS NOT THE PROBLEM. tools/shoterror.ts, every driving case: long +-8-10 cm,
+             lateral +-3-5 cm at 50 in, no term correlating with the miss. tools/releasecheck.ts
+             (new) records every shot at COMMIT and at RELEASE; with scatter off the ball crossed
+             the mouth within +-6 cm long and +-7 wide on the 40 in patrol at 1 m/s. The exit
+             speed and elevation the ball got matched the brain's solution to 0.02 m/s and 0.2
+             deg. So where did a third of them go?
+
+             THE FEED. The commit-to-release delay was 0.13 s OR 0.38 s and nothing between,
+             and 13 of 41 pulses at 1 m/s -- 107 of 118 standing still -- released NOTHING,
+             each a wasted 0.6 s cycle. tools/feedprobe.ts, the tube frame by frame:
+
+               - Robot.stepNip refused to fire until `sinceFeed`, reset at the previous RELEASE,
+                 reached cycleTime_s. The brain runs the same 0.6 s from the previous COMMIT.
+                 Same period, different phase, and the brain's pulse arrived 0.13 s before the
+                 world would allow the shot.
+               - The nip also required the servo to still be past half travel when the ball
+                 arrived. A ball staged above the plate arrived 0.13 s after the commit and
+                 went. One waiting under the plate needed the plate to clear (0.19 s) and 80 mm
+                 of climb (0.2 s), arrived at 0.38-0.40 s, and met a servo back through 0.5 at
+                 0.375 s. Frame quantisation decided which.
+               - The plate re-enabled on a clock, 0.31 s after the pulse, whichever ball was
+                 straddling it; the solver threw that ball up into the wheel or back under the
+                 gate, and the next pulse inherited whichever it was.
+
+             THE DELIVERABLE HAD TWO FEED BUGS OF ITS OWN, which is the README's "the Java
+             decides to fire and the ball never leaves". Transfer.java ran the belt only for
+             the 0.25 s pulse -- a ball has about 0.7 s of tube to climb -- and the OpModes ran
+             the intake only on a trigger, so the stop at the end of LEAVE threw all four
+             preloads out of the mouth while the dead-reckoned hopper went on saying 4
+             (tools/headless.ts now prints the world's own hopper count and true range).
+
+             THE MIRROR CONVERTED THE BEARING WITH THE WRONG HEADING. The lead's field-frame
+             conversion used `s.imu.yaw`, 40 ms stale and uncorrected, while the bearing it was
+             converting is relative to the fused pose's heading; the Java has always used the
+             localizer's heading throughout. Nearly 3 deg of frame mismatch at the 70 deg/s
+             yaw cap.
+
+             WHAT ACTUALLY LIMITS ACCURACY ON THE MOVE IS THE POCKET FILLING. The per-shot
+             dump is unambiguous: in every seed the first ten or eleven balls land and the last
+             two or three before the tip miss, at any angle. e_ball (ball-ball restitution,
+             a GUESS at 0.8) moves this: 66% at 0.8, 73% at 0.5, 79% at 0.3 on the same seeds
+             with scatter off. That is the number to measure on a real ball.
+
+             AND THERE IS NO FLATTER SHOT TO LEAD WITH. tools/flatbranch.ts: the shipped table
+             already returns the flattest arc that threads at every range (a floor of 2.0 m/s
+             horizontal returns the identical rows). The ball's own horizontal at 40-50 in is
+             1.8-2.1 m/s, so sideways motion past about 1.2 m/s cannot be led under the 45 deg
+             cap, and past 1 m/s the lead puts the tag outside the turret camera's 30 deg
+             half-lens. Fast shooting from 40 in has to be radial, or from 60 in out.
+
+Did instead: One clock. The nip is a latch: armed when the servo opens from fully shut, spent by
+             the launch, expired once it is fully shut again. A ball the pulse admitted fires
+             when it reaches the wheel whatever the servo is doing by then; a ball arriving
+             after the gate has shut waits; a half-shut-and-back flicker from the release
+             re-check is not a second pulse. The plate cannot close through a ball. The belt
+             holds the column single file with a soft spring toward the bore axis, because a
+             plate that waits let four balls stack corner to corner in the square bore and
+             arch: the top one 11 mm short of the wheel, the belt driving, thirty seconds of
+             pulses feeding nothing (releasecheck --wasted).
+
+             Transfer.setBeltOn: the belt runs whenever the flywheel has a target. The OpModes
+             run the intake throughout, TeleOpMain reversing it on the left trigger as the
+             mirror does. The mirror uses the fused heading for the lead.
+
+             MEASURED, tools/fastfire.ts --untiltip, 40 in, 3 seeds, 40 s:
+
+               speed      land%   s per ball IN     (before, STATUS.md)
+               standing   100%    1.53 s            95%   1.41 s (zoneaudit: now 96%, 1.09 s)
+               0.39 m/s    75%    0.80 s            74%   1.01 s
+               0.60 m/s    69%    0.86 s
+               0.78 m/s    71%    0.97 s            82%   1.15 s
+               0.99 m/s    68%    1.08 s            75%   1.34 s
+
+             Every row scores more per second. The land rate on the move is down because the
+             robot now really fires every 0.6 s, and the decision above measured what a ball
+             arriving while the last one is still settling does. See the cycle-time row below
+             for the trade.
+
+Costs/risks: The last balls before a tip will keep missing until e_ball is measured. The Java
+             AutoOneTip now keeps its preloads and spins up, but parks 62 deg off the opening
+             where the turret camera cannot decode the tag, and holds fire; autoRoutine.ts
+             drives round for this reason and the OpMode does not yet. The centring spring is
+             a constraint imposed rather than a belt face modelled.
+Who/where:   packages/core/src/physics/robot.ts (stepNip latch, gateBlocked, belt centring),
+             packages/core/src/robot/builtinTeleOp.ts (heading), java/teamcode Transfer.java,
+             Robot.java, AutoOneTip.java, AutoLeavePark.java, TeleOpMain.java,
+             tools/releasecheck.ts (new), tools/feedprobe.ts (new), tools/headless.ts
+
+## 2026-09-19 — Is this the mathematical maximum? Yes for the aim, at every speed; the pile is the rest
+
+Plan said:   "Find the mathematical maximum, test it, and make the robot do the best thing at
+             every speed automatically."
+
+Found:       tools/ceiling.ts gives the per-shot ceiling from launch scatter and the entry
+             model: 86% at 30 in, 88% at 42, 95% at 54, 99% at 78-90. To test the ROBOT
+             against it the pocket has to stay empty, so tools/releasecheck.ts --emptycell
+             benches every ball as it settles. Moving, three seeds, 170-200 shots a cell:
+             40 in 96 / 93 / 95% at 0.4 / 0.7 / 1.0 m/s; 52 in 96 / 93 / 96%. Standing with
+             scatter off: 100% and 92%. The aim is at the ceiling at every speed, and above
+             the model's own 40 in number, so there is no per-speed policy to write.
+
+             The group was 5-7 cm long with scatter off at both ranges. rangeTrim_in 2 -> 4
+             centres it to within a centimetre (100% at 40 and 52 in, scatter off).
+
+             Standing still at 40 in with the pocket filling: 67% from 5 deg off, 71% from
+             25, 75% from 45. The bearing is a small effect; the pile is the loss, standing or
+             moving. Range is the lever the table already carries: stay rate 86% at 30-42 in,
+             95% at 54, 99% at 78, and tools/landrate.ts lands 12/12 at 55 and 70 in at the
+             0.61 s floor. ShotTable.bestBand()/bestRange() ranked rows by speed MARGIN, which
+             put the robot's own ranging at 30-38 in -- the rows where the fewest balls stay.
+
+Did instead: bestBand ranks by the per-shot ceiling (pThread x pStay, the readiness gate's
+             own product) and takes every row within five points of the best: 58-142 in on
+             the shipped table. The Java bestRange aims at the near edge plus the ranging
+             tolerance, 64 in, because farther buys nothing and costs field. tests/shoot.test.ts
+             pins the near edge at 54 or more.
+
+Costs/risks: The per-shot ceiling with a filling pocket still hangs on ball.e_ball, a guess.
+             The empty-pocket numbers are the maximum this shooter model can do; a real
+             shooter with tighter scatter does better, a looser one worse.
+Who/where:   tools/releasecheck.ts (--emptycell, --bearing), config/robot.json (rangeTrim_in),
+             packages/core/src/robot/builtinTeleOp.ts (bestBand), java/teamcode
+             control/ShotTable.java (bestRange), tests/shoot.test.ts
+
+## 2026-09-19 — Every speed, 200 balls each: the aim is at its ceiling and the delay is the mechanism
+
+Plan said:   "Test every speed for 200 balls."
+
+Found:       tools/releasecheck.ts --minshots 200 keeps adding seeds until the sample is the
+             same size at every speed, so no row is a tighter number than its neighbour, and
+             --emptycell benches settled balls so what is measured is the AIM and not the pile.
+             40 in stand-off, 1699 balls, against a model ceiling of 88%:
+
+               asked   actual   balls  accuracy  ball-to-ball  commit->release
+               stand   0.00      264     98%       0.60 s        0.13 s
+               0.25    0.14      264     95%       0.60 s        0.13 s
+               0.50    0.39      258     98%       0.61 s        0.14 s
+               0.75    0.60      247     96%       0.64 s        0.14 s
+               1.00    0.79      229     98%       0.68 s        0.14 s
+               1.25    0.95      226     92%       0.70 s        0.14 s
+               1.50    1.00      211     92%       0.74 s        0.14 s
+
+             At or above the ceiling everywhere. The first real cost of speed appears at
+             0.95 m/s: the downrange group goes from +-8 to +-17 cm and accuracy gives up six
+             points. ASKED IS NOT ACTUAL past 1 m/s -- the 40 in arc is too tight to accelerate
+             round and a mecanum takes half a second to reverse, so 1.25 and 1.50 both measure
+             1.0 m/s and the difference between their rows is the reversals, not the speed.
+
+             THE DELAY IS THREE NUMBERS. Commit to release is 0.13-0.14 s, the gate servo
+             reaching half travel plus the belt lifting the staged ball. Ball to ball with the
+             gate open is 0.60 s EXACTLY -- transfer.cycleTime_s -- and standing 30 deg off the
+             opening 260 of 260 gaps were one cycle. In the patrol the median stays 0.60 s at
+             every speed while the MEAN climbs to 0.74: a refused cycle costs a whole 0.6 s,
+             so the histogram is one cycle or two and almost nothing between (at 1.0 m/s, 195
+             gaps of one against 30 of two). The reversal at the end of each pass is what
+             refuses them, with the turret slewing and the yaw cap over.
+
+             AND THE SECTOR EDGE IS NOT A FAIR STANDING SPOT. At speed 0 the patrol parks at
+             the arc's end, 59 deg off the opening against a 60 deg cap, where the release
+             re-check keeps withdrawing permission mid-pulse: 66 wasted pulses and a 1.39 s
+             mean gap. That is the cap working, not a fault, but it measures the cap rather
+             than the shooter -- hence --bearing.
+
+Did instead: Nothing to change in the robot: there is no per-speed policy to write when the
+             aim is already at its ceiling at every speed. --minshots, --bearing and the
+             ball-to-ball histogram are recorded so the claim can be re-run.
+Who/where:   tools/releasecheck.ts, docs/STATUS.md, README.md

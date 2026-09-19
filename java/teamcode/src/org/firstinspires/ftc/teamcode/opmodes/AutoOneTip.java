@@ -5,6 +5,7 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.teamcode.control.AimController;
 import org.firstinspires.ftc.teamcode.control.DriveToRange;
+import org.firstinspires.ftc.teamcode.control.Localizer;
 import org.firstinspires.ftc.teamcode.subsystems.Robot;
 import org.firstinspires.ftc.teamcode.util.Units;
 
@@ -37,6 +38,13 @@ public class AutoOneTip extends LinearOpMode {
         if (!opModeIsActive()) return;
 
         ElapsedTime match = new ElapsedTime();
+        // THE INTAKE RUNS THE WHOLE TIME, as the simulator's own brain has it ("always
+        // running, because a real one is"). The roller pressing on the preloads is what holds
+        // them in the bin under braking: with it off, the stop at the end of LEAVE threw all
+        // four out through the mouth and the dead-reckoned hopper count went on saying 4.
+        // That is the README's "counts its hopper down from 6 to 2 and the world records
+        // shots 0" -- measured with tools/headless.ts --dumpact.
+        robot.intake.collect();
         resetAndSettle(robot);
         double hold = robot.drive.getHeadingDeg();
 
@@ -59,6 +67,8 @@ public class AutoOneTip extends LinearOpMode {
             robot.drive.driveRobotCentric(forward, 0, headingHold(robot, hold));
             robot.update();
             telemetry.addData("ranging", "%.1f in, margin %.1f%%", range, robot.shots.marginFor(range) * 100);
+            Localizer lz = robot.localizer();
+            if (lz != null) telemetry.addData("pose", "%.1f, %.1f @ %.0f", lz.getX(), lz.getY(), lz.getHeadingDeg());
             telemetry.update();
             idle();
         }

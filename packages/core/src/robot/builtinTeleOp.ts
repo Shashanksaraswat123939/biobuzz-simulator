@@ -93,11 +93,25 @@ export class ShotTable {
     return r[r.length - 1];
   }
 
-  /** The range band with the widest margin: where DriveToRange wants the robot to be. */
+  /**
+   * The range band where a shot is most likely to LAND: where DriveToRange wants the robot.
+   *
+   * This was the band with the widest speed MARGIN, which is the 30-38 in rows -- the very
+   * ranges where the fewest balls stay in. Margin is how much wheel error still threads the
+   * mouth; a steep close lob threads with huge margin and then bounces back out, and the
+   * measured stay rate climbs from 86% at 30-42 in to 95% at 54 and 99% at 78
+   * (tools/ceiling.ts; tools/landrate.ts lands 12 of 12 at 55 and 70 in). So the band is the
+   * rows within five points of the best per-shot ceiling the table carries, which is the same
+   * product the readiness gate scores a shot by. Rows without the model fall back to margin.
+   */
   bestBand(): [number, number] {
     if (!this.rows.length) return [60, 90];
-    const best = Math.max(...this.rows.map((r) => r.margin));
-    const good = this.rows.filter((r) => r.margin >= best * 0.95);
+    const ceiling = (r: ShotRow): number => {
+      if (r.speedLo === undefined || r.speedHi === undefined || r.sigmaSpeed === undefined) return r.margin;
+      return pThread(r.speedLo, r.speedHi, (r.speedLo + r.speedHi) / 2, r.sigmaSpeed) * (r.pStay ?? 1);
+    };
+    const best = Math.max(...this.rows.map(ceiling));
+    const good = this.rows.filter((r) => ceiling(r) >= best - 0.05);
     return [good[0].range_in, good[good.length - 1].range_in];
   }
 }
@@ -762,7 +776,13 @@ export class BuiltinTeleOp {
     // velocity is the filtered one for the same reason the lead uses it: an unfiltered radial
     // velocity would jitter the table lookup.
     const cal = this.spec.calibration ?? { rangeTrim_in: 0, turretTrim_deg: 0 };
-    const bearingNow = (s.imu.yaw + tgt.azimuthDeg) * DEG;
+    // ONE HEADING, THE FUSED ONE. `tgt.azimuthDeg` is relative to the fused pose's heading;
+    // the lead used to convert it to the field frame with `s.imu.yaw`, which is 40 ms stale
+    // (hub.imuLatencyMs) and uncorrected. On a chassis yawing at the 70 deg/s cap that is
+    // nearly 3 deg of frame mismatch between the bearing and the velocity being subtracted
+    // from it. AimController.java has always used the localizer's heading for all of it.
+    const heading = this.pose.heading;
+    const bearingNow = (heading + tgt.azimuthDeg) * DEG;
     const vrNow = velX * Math.cos(bearingNow) + velY * Math.sin(bearingNow);
     const rangeLead = this.spec.flywheel.rangeLead_s ?? 0;
     const rangeAtRelease = tgt.rangeIn - (vrNow * rangeLead) / 0.0254;
@@ -862,17 +882,17 @@ export class BuiltinTeleOp {
     // THE BALL INHERITS THE MUZZLE'S VELOCITY, NOT THE CHASSIS'S. omega x r, added to both
     // consumers of the velocity below: the lead that cancels it and the radial axis of the
     // hood table. Robot.launch() applies the matching term to the flight.
-    const mv = muzzleVelocity(leadVx, leadVy, s.localizer.omega, s.imu.yaw, turretActualDeg, this.spec.turret.muzzleOffset_m);
+    const mv = muzzleVelocity(leadVx, leadVy, s.localizer.omega, heading, turretActualDeg, this.spec.turret.muzzleOffset_m);
     const muzzleDvx = mv.vx - leadVx;
     const muzzleDvy = mv.vy - leadVy;
-    const lead = leadShot(tgt.azimuthDeg, tableSpeed, hoodDeg, mv.vx, mv.vy, s.imu.yaw, this.spec.hood.angleRange_deg);
+    const lead = leadShot(tgt.azimuthDeg, tableSpeed, hoodDeg, mv.vx, mv.vy, heading, this.spec.hood.angleRange_deg);
 
     // ---- FIXED-SPEED PATH: the wheel holds one speed and the hood aims.
     //
     // The robot's radial velocity -- how fast it is closing on the mouth -- is the table's
     // second axis rather than something to cancel. Positive is closing. Lateral motion barely
     // moves the answer, which is why this is the only component that has to be known.
-    const bearingField = (s.imu.yaw + tgt.azimuthDeg) * DEG;
+    const bearingField = bearingNow;
     const vRadial = (velX + muzzleDvx) * Math.cos(bearingField) + (velY + muzzleDvy) * Math.sin(bearingField);
     st.vRadial = vRadial;
     this.hoodCell = this.hoodTable && !this.hoodTable.isEmpty

@@ -196,8 +196,8 @@
  },
  "calibration": {
   "_about": "Field trims. These are what a team actually adjusts between matches: they correct the SHOT TABLE against the real robot without regenerating it, and the Analysis tab computes them from a collected run.",
-  "rangeTrim_in": 2.0,
-  "rangeTrim_in_source": "MEASURED by tools/movingtune.ts --sweep, firing from a DRIVING robot and recording where each ball crossed the mouth plane. The group sat 3-4 cm long with a 10 cm spread; the brain looks the table up at (range - trim), so a positive trim asks for a shorter shot. Swept 0-6 in over 48 balls a step: 0 gave 92% and +3 cm, 2 gave 96% and -1 cm, 3 gave 90%, 5 gave 96% and -6 cm. 2 in is where the group is CENTRED, which is the setting that keeps its margin when anything else moves. RE-MEASURE after any change to the muzzle, the shot table or the entry model: this absorbs the residue of all three.",
+  "rangeTrim_in": 4.0,
+  "rangeTrim_in_source": "RE-MEASURED 2026-09-19 by tools/releasecheck.ts --noscatter --emptycell after the feed race was fixed: the group sat +7 +-2 cm long standing at 40 in and +5 +-3 at 52 in, every shot, so the table's answer reaches 2-3 in past the mouth's centre. +2 in of trim moves it back onto the centre, which is the setting that keeps the most margin against a pile. WAS 2.0, MEASURED by tools/movingtune.ts --sweep, firing from a DRIVING robot and recording where each ball crossed the mouth plane. The group sat 3-4 cm long with a 10 cm spread; the brain looks the table up at (range - trim), so a positive trim asks for a shorter shot. Swept 0-6 in over 48 balls a step: 0 gave 92% and +3 cm, 2 gave 96% and -1 cm, 3 gave 90%, 5 gave 96% and -6 cm. 2 in is where the group is CENTRED, which is the setting that keeps its margin when anything else moves. RE-MEASURE after any change to the muzzle, the shot table or the entry model: this absorbs the residue of all three.",
   "turretTrim_deg": 0.0,
   "turretTrim_deg_source": "measured: atan(mean lateral error / mean range) from a collected run. Subtracted from the commanded azimuth, so it also absorbs a turret encoder zero that is a degree off."
  },

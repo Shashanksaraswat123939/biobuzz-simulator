@@ -76,12 +76,21 @@ export class Robot {
   /** Balls inside the feed shaft, lowest first. */
   private inShaft: Ball[] = [];
   private sinceFeed = 999;
+  /**
+   * A feed pulse owes exactly one ball. Armed when the gate servo passes half travel opening,
+   * spent by the launch, and expired once the servo is fully shut again -- so a ball that the
+   * pulse admitted fires when it reaches the wheel even if the servo has started back, and a
+   * ball that arrives after the gate has shut waits for the next pulse.
+   */
+  private gateArmed = false;
+  /** The servo has been fully shut since the last opening, so the next opening is a new pulse. */
+  private gateShut = true;
   /** Top face of the bin floor, robot-local. */
   private binFloorY = 0;
   /** The gate plate across the feed tube. Enabled means closed. */
   private gateCollider: RAPIER_NS.Collider | null = null;
   /** Inside of the feed shaft, robot-local: half-extent and centre height range. */
-  private shaft = { half: 0.055, z: -0.02, topY: 0.11, capY: 0.17, wall: 0.008 };
+  private shaft = { half: 0.055, z: -0.02, topY: 0.11, capY: 0.17, wall: 0.008, gateY: 0.05 };
   turretAngle = 0;
   turretOmega = 0;
   turretTargetDeg = 0;
@@ -560,7 +569,8 @@ export class Robot {
     const topY = this.spec.turret.muzzleHeight_m - this.spec.chassis.height_m / 2 - this.spec.chassis.clearance_m;
     const capY = topY + r + t * 2;
     const z = -0.02;
-    this.shaft = { half, z, topY, capY, wall: t };
+    const gateY = topY - r * 2.1;
+    this.shaft = { half, z, topY, capY, wall: t, gateY };
 
     const lo = this.binFloorY;
     const midY = (lo + capY) / 2;
@@ -587,7 +597,6 @@ export class Robot {
     // it the belt runs continuously, the magazine stays loaded against the gate, and
     // "ready to fire" becomes a physical event: the plate retracts and the next ball rises
     // into the wheel. The servo drives `setEnabled` on this collider each step.
-    const gateY = topY - r * 2.1;
     this.gateCollider = world.createCollider(
       R.ColliderDesc.cuboid(half, t / 2, half)
         .setTranslation(0, gateY, z)
@@ -756,7 +765,16 @@ export class Robot {
     const gateOpen = !tp.gate.enabled || Math.abs(gate.pos - tp.gate.open) < 0.25;
     // The gate is a plate, and this is where the servo moves it. Balls stack against it
     // while it is closed, which is what keeps the magazine loaded between shots.
-    this.gateCollider?.setEnabled(!gateOpen);
+    //
+    // AND A PLATE CANNOT CLOSE THROUGH A BALL. The collider used to come back the instant the
+    // servo dropped under 0.75, on a clock, and the belt was still lifting the admitted ball
+    // through the plane it closes across: measured (tools/feedprobe.ts) the ball's centre sat
+    // 10-20 mm past the plate when it re-appeared inside it, and the contact solver threw the
+    // ball whichever way was nearer -- sometimes up into the wheel, sometimes back under the
+    // gate to wait a whole cycle. A real flap presses on the ball and closes once it has gone
+    // by; that is what this does.
+    if (gateOpen || this.gateBlocked(balls)) this.gateCollider?.setEnabled(false);
+    else this.gateCollider?.setEnabled(true);
     const m = this.motors.get('transfer')!;
     this.sinceFeed += dt;
     this.debugFeed = { indexed: 0, lifted: 0, running: m.duty > 0.2 };
@@ -784,6 +802,21 @@ export class Robot {
       // Damp the sideways rattle: a ball pinballing between two walls a few mm apart bleeds
       // its whole climb into noise and never reaches the top.
       b.body.addForce({ x: -bv.x * 2 * b.mass, y: 0, z: -bv.z * 2 * b.mass }, true);
+      // AND KEEP THE COLUMN SINGLE FILE. The bore is 25 mm wider than the ball, so a chassis
+      // accelerating sideways can push successive balls into alternate CORNERS of the square
+      // bore, where the stack becomes an arch: each ball pressed diagonally into two walls by
+      // the one below, the belt lifting all four, nothing moving. Measured by
+      // tools/releasecheck.ts --wasted: four balls at x = -14, +13, -13, +13 mm, the top one
+      // 11 mm short of the wheel, the belt at full speed, 30 s of pulses feeding nothing. A
+      // real belt runs up one wall and presses the ball against the opposite one, so the
+      // balls ride in one line and cannot stagger; this is that constraint as a soft spring
+      // toward the bore axis.
+      // ponytail: a spring, not a modelled belt face. Model the belt as a wall contact if the
+      // single-file assumption ever has to be measured rather than imposed.
+      const q = balls.pos(b);
+      const rel = this.toLocal([q[0] - p[0], q[1] - p[1], q[2] - p[2]]);
+      const centre = this.toWorld([-rel[0] * 400 * b.mass, 0, -(rel[2] - sh.z) * 400 * b.mass]);
+      b.body.addForce({ x: centre[0], y: 0, z: centre[2] }, true);
     }
 
     // ---- the indexer, metered to ONE ball at a time
@@ -862,6 +895,17 @@ export class Robot {
     best.body.addForce({ x: w[0], y: (tp.indexLift ?? 0.6) * push, z: w[2] }, true);
   }
 
+  /** Is a ball across the gate plate's plane, so the plate cannot close? */
+  private gateBlocked(balls: BallSet): boolean {
+    const p = this.pos;
+    const sh = this.shaft;
+    return this.inShaft.some((b) => {
+      const q = balls.pos(b);
+      const y = this.toLocal([q[0] - p[0], q[1] - p[1], q[2] - p[2]])[1];
+      return Math.abs(y - sh.gateY) < b.radius + sh.wall / 2 + 0.002;
+    });
+  }
+
   /**
    * The nip: where the flywheel meets the ball at the top of the shaft.
    *
@@ -875,7 +919,6 @@ export class Robot {
    */
   private stepNip(balls: BallSet, t: number): void {
     if (this.flywheelOmega < 20) return;
-    if (this.sinceFeed < this.spec.transfer.cycleTime_s) return;
     // THE GATE HAS TO MEAN SOMETHING. This fired whatever was sitting at the nip as soon as
     // the cycle timer came round, and never looked at the gate -- so the gate only decided
     // whether the NEXT ball climbed, and the one already in the chamber went whatever the
@@ -889,11 +932,39 @@ export class Robot {
     //
     // The servo is the release, as `Transfer` on the hub has it: a ball at the nip goes when
     // the gate is open and waits when it is not.
+    //
+    // ONE BALL PER PULSE, NOT ONE BALL PER CLOCK AND NOT ONE PER SERVO POSITION.
+    //
+    // Two things used to decide the release besides the ball being at the wheel, and both
+    // were clocks racing each other. `sinceFeed`, reset at the previous RELEASE, had to reach
+    // cycleTime_s -- while the brain runs the same 0.6 s from the previous COMMIT, so the two
+    // ran at one period with a different phase. And the servo had to still be past half travel
+    // at the instant the ball arrived: a ball waiting ABOVE the plate arrived 0.13 s after the
+    // commit (the servo reaching 0.5) and went; a ball waiting UNDER it needed the plate to
+    // clear (0.19 s) and then 80 mm of climb (0.2 s), arrived at 0.38-0.40 s, and found the
+    // servo already back through 0.5 at 0.375 s. Measured with tools/releasecheck.ts on the
+    // 40 in patrol: delays of 0.13 OR 0.38 s and nothing between, and 13 of 41 pulses released
+    // NOTHING -- each a wasted 0.6 s cycle. Standing still it was 107 of 118.
+    //
+    // Transfer.java is the authority on the cycle time and has one clock. What the world owes
+    // it is that one pulse feeds one ball: a latch, armed when the servo opens, spent by the
+    // launch, and expired once the servo is fully shut. A ball the pulse admitted fires when
+    // it reaches the wheel whatever the servo is doing by then; a ball arriving after the gate
+    // has shut waits for the next pulse; and a second ball cannot follow the first out because
+    // the plate (which now waits for the first to pass, see stepTransfer) holds it.
     const gate = this.servos.get('gate');
     if (gate && this.spec.transfer.gate?.enabled !== false) {
       const open = this.spec.transfer.gate.open ?? 1;
       const closed = this.spec.transfer.gate.closed ?? 0;
-      if (Math.abs(gate.pos - open) > Math.abs(gate.pos - closed)) return;
+      const isOpen = Math.abs(gate.pos - open) <= Math.abs(gate.pos - closed);
+      // FULLY SHUT, then open, is a pulse. Half-shut and back up is not: the brain's release
+      // re-check can drop the servo for a frame or two mid-pulse, and counting that as a
+      // second opening fed a second ball on the same request (tools/releasecheck.ts).
+      if (Math.abs(gate.pos - closed) < 0.05) { this.gateArmed = false; this.gateShut = true; }
+      else if (isOpen && this.gateShut) { this.gateArmed = true; this.gateShut = false; }
+      if (!this.gateArmed) return;
+    } else if (this.sinceFeed < this.spec.transfer.cycleTime_s) {
+      return;                      // no gate modelled: the clock is all there is
     }
     const p = this.pos;
     for (const b of this.inShaft) {
@@ -902,6 +973,7 @@ export class Robot {
       if (rel[1] < this.shaft.topY - b.radius) continue;
       this.launch(b, balls, t);
       this.sinceFeed = 0;
+      this.gateArmed = false;
       return;               // one ball per pass, like one ball per wheel revolution
     }
   }
@@ -1226,6 +1298,8 @@ export class Robot {
     this.hopper = [];
     this.inShaft = [];
     this.sinceFeed = 999;
+    this.gateArmed = false;
+    this.gateShut = true;
     this.turretAngle = 0;
     this.turretOmega = 0;
     this.turretTargetDeg = 0;

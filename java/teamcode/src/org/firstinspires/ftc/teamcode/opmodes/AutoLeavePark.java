@@ -26,6 +26,7 @@ public class AutoLeavePark extends LinearOpMode {
         telemetry.addLine("AutoLeavePark ready");
         telemetry.update();
         waitForStart();
+        robot.intake.collect();   // holds the preloads in under braking; see AutoOneTip
         if (!opModeIsActive()) return;
 
         ElapsedTime timer = new ElapsedTime();

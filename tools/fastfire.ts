@@ -52,6 +52,8 @@ async function run(speed: number, standoff_in: number, secs: number, seed: numbe
   const incArg = process.argv.indexOf('--incidence');
   if (incArg >= 0) spec.sensors.tag.maxIncidence_deg = Number(process.argv[incArg + 1]);
   if (process.argv.includes('--freshonly')) spec.sensors.tag.target.fireOnOdometry = false;
+  const cyArg = process.argv.indexOf('--cycle');
+  if (cyArg >= 0) spec.transfer.cycleTime_s = Number(process.argv[cyArg + 1]);
   const mrArg = process.argv.indexOf('--minrange');
   if (mrArg >= 0) spec.shot = { minRange_in: Number(process.argv[mrArg + 1]) };
   const fovArg = process.argv.indexOf('--fov');

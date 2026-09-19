@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode.control;
 
+import org.firstinspires.ftc.teamcode.config.ShotTableData;
+
 /**
  * range -> (hood position, flywheel RPM, margin), generated offline by
  * tools/shottable.ts and baked in by tools/genconstants.mjs.
@@ -49,37 +51,49 @@ public class ShotTable {
     public double marginFor(double rangeIn) { return lerp(margin, rangeIn); }
 
     /**
-     * The range with the widest tolerance: where DriveToRange wants to be.
+     * The range where a shot is most likely to LAND: where DriveToRange wants to be.
      *
-     * THE MIDDLE OF THE GOOD BAND, not the single best row, and that is not a refinement --
-     * it is the difference between the autonomous scoring and not.
-     *
-     * Taking the argmax returned 30.0 in for the shipped table, which is also the table's
-     * FIRST row. DriveToRange then parked the robot exactly on the table's floor, where an
-     * inch of overshoot or a noisy range reading puts it at 28 in and `usable()` is false. So
-     * AutoOneTip's "back off until the table has an answer" loop could never satisfy its exit
-     * condition, ran out its twelve seconds, and fell through to PARK having fired nothing.
-     * That is the unexplained "Auto One Tip does not currently score its shots" in the README.
-     *
-     * Every row within 95% of the best margin is good enough to shoot from -- mirroring
-     * ShotTable.bestBand() in the TypeScript -- so aim at the centre of that band and keep the
-     * edges as tolerance instead of spending them on arriving.
+     * This was the widest speed-margin band, 30-38 in on the shipped table -- exactly the
+     * rows where the fewest balls stay in the CELL. Margin says how much wheel error still
+     * threads the mouth; a steep close lob threads with huge margin and bounces back out, and
+     * the measured stay rate climbs from 86% at 30-42 in to 95% at 54 and 99% at 78
+     * (tools/ceiling.ts, tools/landrate.ts). So the band is every row within five points of
+     * the best per-shot ceiling the table carries -- the same product LandProbability scores a
+     * shot by -- and the target is the NEAR edge of it plus the driver's tolerance: farther
+     * buys nothing and costs flight time and field. Mirrors ShotTable.bestBand() in the
+     * TypeScript. A table without the model columns falls back to the margin band.
      */
     public double bestRange() {
         if (range.length == 0) return 0;
+        double[] score = new double[range.length];
+        boolean modelled = ShotTableData.SPEED_LO.length == range.length
+                && ShotTableData.SIGMA_SPEED.length == range.length;
         double best = 0;
-        for (int i = 0; i < range.length; i++) if (margin[i] > best) best = margin[i];
+        for (int i = 0; i < range.length; i++) {
+            if (modelled) {
+                double lo = ShotTableData.SPEED_LO[i], hi = ShotTableData.SPEED_HI[i];
+                double stay = ShotTableData.P_STAY.length == range.length ? ShotTableData.P_STAY[i] : 1;
+                score[i] = LandProbability.pThread(lo, hi, (lo + hi) / 2, ShotTableData.SIGMA_SPEED[i]) * stay;
+            } else {
+                score[i] = margin[i];
+            }
+            if (score[i] > best) best = score[i];
+        }
+        double floor = modelled ? best - 0.05 : best * 0.95;
         int lo = -1;
         int hi = -1;
         for (int i = 0; i < range.length; i++) {
-            if (margin[i] >= best * 0.95) {
+            if (score[i] >= floor) {
                 if (lo < 0) lo = i;
                 hi = i;
             }
         }
         if (lo < 0) return range[0];
-        return (range[lo] + range[hi]) / 2;
+        return modelled ? range[lo] + BEST_RANGE_IN_FROM_EDGE : (range[lo] + range[hi]) / 2;
     }
+
+    /** How far inside the near edge of the best band to aim the ranging, inches. */
+    private static final double BEST_RANGE_IN_FROM_EDGE = 6.0;
 
     /** Is this range worth shooting from at all? */
     public boolean usable(double rangeIn) {

@@ -109,7 +109,7 @@ export async function main(argv: string[] = []): Promise<void> {
       console.log(
         `t=${world.t.toFixed(1)}s ${s.period.padEnd(10)} ` +
           `pose ${r.ftc.x.toFixed(0)},${r.ftc.y.toFixed(0)} @${r.ftc.heading.toFixed(0)}deg  ` +
-          `rpm ${r.flywheel.rpm.toFixed(0)}  shots ${r.flywheel.shots}  ` +
+          `rpm ${r.flywheel.rpm.toFixed(0)}  shots ${r.flywheel.shots}  hopper ${r.hopper.count}  range ${world.sensors().game.truth.upCellRangeIn.toFixed(0)}in  ` +
           `tips ${s.score[alliance].tips}  score ${s.score[alliance].total}` +
           (brainSeq >= 0 ? '' : '   [no brain yet]'),
       );

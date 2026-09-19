@@ -8,7 +8,7 @@ import org.firstinspires.ftc.teamcode.control.DriveToRange;
 import org.firstinspires.ftc.teamcode.control.Localizer;
 import org.firstinspires.ftc.teamcode.subsystems.Robot;
 
-/** Driver practice: field-centric drive, intake on the triggers, auto-aim on X. */
+/** Driver practice: robot-centric drive, intake always on (left trigger reverses), auto-aim on X. */
 @TeleOp(name = "TeleOp Main", group = "match")
 public class TeleOpMain extends LinearOpMode {
 
@@ -76,13 +76,14 @@ public class TeleOpMain extends LinearOpMode {
                 robot.drive.driveRobotCentric(forward, left, turn);
             }
 
-            if (gamepad1.right_trigger > 0.1) {
-                robot.intake.collect();
-                robot.hopper.setCount(robot.hopper.getCount()); // real counter goes here
-            } else if (gamepad1.left_trigger > 0.1) {
+            // ALWAYS RUNNING, reversed on the left trigger -- the same as BuiltinTeleOp. A
+            // roller that only turns while a trigger is held lets the bin empty itself out of
+            // the mouth on every hard stop.
+            if (gamepad1.left_trigger > 0.1) {
                 robot.intake.eject();
             } else {
-                robot.intake.stop();
+                robot.intake.collect();
+                robot.hopper.setCount(robot.hopper.getCount()); // real counter goes here
             }
 
             if ((gamepad1.right_bumper || gamepad1.b) && canShoot) aim.fireIfReady();

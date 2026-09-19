@@ -74,12 +74,15 @@ Current results, in lockstep:
 | `Auto Leave + Park` | LEAVE + PARK, **8 pts** |
 | `Auto One Tip` | LEAVE + PARK, **8 pts** — see below |
 
-> `Auto One Tip` **does not currently score its shots**, and this table used to claim 28 pts
-> for it. Run with `--echo` the brain is plainly working: it backs off to 31.8 in, reports
-> `status: READY`, holds the hood at 75° and the wheel at 2293 rpm, and counts its hopper down
-> from 6 to 2. The world records `shots 0` for the same run. So the Java decides to fire and
-> the ball never leaves — the gap is in the feed across the bridge, not in the aim. The same
-> aim code shooting the built-in brain's world scores normally (`tools/movingfire.ts`).
+> `Auto One Tip` **does not currently score its shots**. Two of the reasons were in the
+> deliverable and are fixed: the Java ran its feed belt only for the 0.25 s pulse, so no ball
+> could climb the tube (`Transfer.setBeltOn`), and it ran the intake only on a trigger, so the
+> stop at the end of LEAVE threw all four preloads out of the mouth while the dead-reckoned
+> hopper count went on saying 4 (`tools/headless.ts` now prints the world's own hopper count
+> and true range so this cannot hide again). What remains is the routine: from where it parks
+> the CELL is 62° off its opening and the turret camera cannot decode the tag, so it holds
+> fire with `tag fix Infinity ms old`. The built-in `autoRoutine.ts` drives round for exactly
+> this reason; the Java OpMode does not yet.
 
 ## The tools
 
@@ -112,16 +115,20 @@ anything in it can be re-run and checked.
 
 The short version, as of 19 September 2026:
 
-| | accuracy | time per ball |
+| | accuracy | time per ball IN |
 |---|---|---|
-| standing on a green square | **95%** | 1.41 s |
-| driving at 0.73 m/s, 40 in out | **82%** | **1.15 s** |
+| standing on a green square | **96%** | **1.09 s** |
+| driving at 0.39 m/s, 40 in out | 75% | **0.80 s** |
+| driving at 0.78 m/s, 40 in out | 71% | 0.97 s |
 | autonomous (5 runs) | 86% | 8 points, LEAVE 5/5, PARK 5/5 |
 
-Accuracy is close to its ceiling — 88% is the physical best at that range, because a steep
-close lob bounces back out. **Throughput is not**: the robot fires 1.05 balls a second against
-a feed that allows 1.67, and the reason is that its land-probability score does not vary, so
-it cannot tell a good shot from a bad one. That is the open problem.
+Into an **empty** pocket the robot lands **92–98% at every speed it can reach**, measured over
+1699 balls with at least 200 at each speed (`tools/releasecheck.ts --emptycell --minshots 200`).
+That is the ceiling this shooter's scatter allows. A ball leaves 0.13 s after the brain commits
+it, and the gap between balls is 0.60 s — the mechanism's own floor — at every speed. What misses is the pile: the last balls before the HIVE tips, into a pocket
+already holding eight or more, standing or moving. How hard a ball bounces off another ball
+(`ball.e_ball`) is a guess that moves that by 13 points; it is a measurement, not code. The
+robot's own ranging now drives to 58 in and out, where a ball that arrives stays in.
 
 This section used to carry a page of results that had drifted out of date — a 38–50% land
 rate and an 85° hood, neither of which has been true for some time. Numbers live in STATUS.md

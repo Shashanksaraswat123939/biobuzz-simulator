@@ -109,6 +109,23 @@ to the tube's axis; aiming at the axis pressed balls into a solid side wall.
 The belt runs continuously and the gate is the release, so the magazine stays loaded between
 shots. Gating the belt instead emptied the tube back into the bin every cycle.
 
+Two rules make one pulse mean one ball, and both were found by watching the tube frame by
+frame (`tools/feedprobe.ts`, `tools/releasecheck.ts`):
+
+- **The plate cannot close through a ball.** The collider used to come back on a clock, 0.31 s
+  after the pulse, while the belt was still lifting the admitted ball through its plane; the
+  solver then threw the ball whichever way was nearer, sometimes back under the gate for a whole
+  cycle. It now waits for the ball to pass.
+- **A pulse owes exactly one ball.** The nip used to require the servo to still be past half
+  travel at the instant the ball arrived, on top of its own 0.6 s clock reset at the previous
+  *release* — while the brain runs the same 0.6 s from the previous *commit*. A ball waiting
+  above the plate went 0.13 s after the commit; one waiting under it needed the plate to clear
+  and 80 mm of climb, arrived at 0.38–0.40 s, and found the servo back through half travel at
+  0.375 s. Delays were 0.13 s or 0.38 s and nothing between, and a third of the pulses on the
+  40 in patrol released nothing. The release is now a latch: armed when the servo opens from
+  fully shut, spent by the launch, expired once it is fully shut again. Every pulse fires one
+  ball, 0.12 s after the commit with a ball staged.
+
 **Nip** (`stepNip`). **This is the one place still modelled as an impulse rather than as
 contact, and the reason is numerical.** The wheel turns at ~3500 rpm, so the nip opens and
 closes in about 400 µs; resolving that as contact needs a timestep two orders of magnitude

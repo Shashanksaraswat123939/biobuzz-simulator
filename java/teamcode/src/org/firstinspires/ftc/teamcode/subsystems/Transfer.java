@@ -22,6 +22,7 @@ public class Transfer {
     private final ElapsedTime pulse = new ElapsedTime();
     private boolean pulsing = false;
     private boolean gateOpen = false;
+    private boolean beltOn = false;
 
     public void init(HardwareMap hw, RobotConfig config) {
         cfg = config;
@@ -59,9 +60,20 @@ public class Transfer {
 
     public void setGate(boolean open) { gateOpen = open; }
 
+    /**
+     * THE BELT RUNS WHENEVER THE SHOOTER IS ARMED, and the gate meters. This ran the belt only
+     * for the 0.25 s feed pulse, so a ball had a quarter of a second to climb from the bin to
+     * the wheel -- about 0.7 s of travel -- and the tube emptied back into the bin between
+     * shots. That is the README's "the Java decides to fire and the ball never leaves": the
+     * simulator's mirror (BuiltinTeleOp) has run the belt continuously while armed since the
+     * gate became a real plate, and the deliverable had not caught up. Robot.update() sets
+     * this from the flywheel's target.
+     */
+    public void setBeltOn(boolean on) { beltOn = on; }
+
     public void update() {
         if (pulsing && pulse.seconds() >= cfg.feedPulseS) pulsing = false;
-        motor.setPower(pulsing ? 1.0 : 0.0);
+        motor.setPower(beltOn || pulsing ? 1.0 : 0.0);
         if (gate != null) gate.setPosition(gateOpen || pulsing ? cfg.gateOpen : cfg.gateClosed);
     }
 

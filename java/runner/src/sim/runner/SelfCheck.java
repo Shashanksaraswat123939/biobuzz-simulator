@@ -132,6 +132,9 @@ public class SelfCheck {
         double mid = (table.minRange() + table.maxRange()) / 2;
         that("shot table interpolates a sane rpm", table.rpmFor(mid) > 500 && table.rpmFor(mid) < 8000);
         that("shot table clamps below its range", table.rpmFor(table.minRange() - 50) == table.rpmFor(table.minRange()));
+        // Ranked by landing ceiling, not speed margin: the close rows thread widest and bounce
+        // out most, so the ranging target must sit where the stay rate has climbed.
+        that("best range is where balls stay in, not where the margin is widest", table.bestRange() >= 54);
         that("exit speed rises with rpm", cfg.exitSpeedFor(4000) > cfg.exitSpeedFor(2000));
         near("exit speed is k*omega*r", cfg.exitSpeedFor(3000),
                 0.45 * 0.048 * (3000 * 2 * Math.PI / 60.0), 1e-9);
