@@ -30,6 +30,12 @@ const f3 = (v: number) => v.toFixed(3);
 const f0 = (v: number) => v.toFixed(0);
 
 export const TUNABLES: Tunable[] = [
+  // ---------------------------------------------------------------- driving
+  { group: 'Driving', label: 'Patrol half-angle (deg)', fmt: f0,
+    hint: 'How far round the CELL’s opening the driver should go, drawn on the floor by the Patrol zone overlay. NOT the fire gate — that is the turret’s off-opening cap at 60 deg and it is wider. Measured on the stock robot with the gate untouched, varying only how far the patrol drives: ±60 deg lands 66% at 1.19 s per ball IN, ±45 lands 73% at 0.97, ±35 lands 67% at 1.27. The far edge of the legal sector is where the mouth is half shut AND where the robot is reversing, because the extreme bearing is the end of a pass.',
+    min: 10, max: 60, step: 1,
+    get: (_p, r) => r.shot?.patrolHalfAngle_deg ?? 35,
+    set: (_p, r, v) => { r.shot = { ...(r.shot ?? {}), patrolHalfAngle_deg: v }; } },
   // ---------------------------------------------------------------- shooter
   { group: 'Shooter', label: 'Flywheel transfer k', fmt: f3,
     hint: 'Fraction of rim speed the ball leaves with. GUESS. Exit speed is k·ω·r, so this scales every shot — a 5% error here is a 5% range error at every distance.',

@@ -135,9 +135,10 @@ async function run(speed: number, standoff_in: number, secs: number, seed: numbe
   // could not be told apart. The route now comes from the SHIPPED value unless --pathcap says
   // otherwise, and --opencap moves the gate alone.
   const pc = process.argv.indexOf('--pathcap');
+  const ship = robotSpec as unknown as RobotSpec;
   const capDeg = pc >= 0
     ? Number(process.argv[pc + 1])
-    : ((robotSpec as unknown as RobotSpec).turret.fireOpenCap_deg ?? 60);
+    : (ship.shot?.patrolHalfAngle_deg ?? ship.turret.fireOpenCap_deg ?? 60);
   let bestLo = 0, bestHi = 0, curLo: number | null = null;
   for (let b = -capDeg; b <= capDeg; b += 2) {
     if (onField(onArc(b))) {

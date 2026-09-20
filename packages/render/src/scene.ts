@@ -386,6 +386,10 @@ export class Scene {
   private cadStatics: THREE.Object3D[] = [];
   private cadLoaded = false;
   private sightLine!: THREE.Mesh;
+  /** The patrol sector on the floor: where the driver should stay, not where a shot is legal. */
+  private patrolMesh: THREE.Mesh | null = null;
+  private patrolKey = '';
+  showPatrolSector = false;
   private zoneMesh: THREE.Mesh | null = null;
   private zone: ZonePayload | null = null;
   private zoneSide: 0 | 1 = 0;
@@ -423,6 +427,70 @@ export class Scene {
     this.zoneMesh = mesh;
     this.scene.add(mesh);
     this.repaintZone([0, 0]);
+  }
+
+  /**
+   * THE PATROL SECTOR, painted on the tiles: the wedge either side of the up CELL's opening
+   * that the driver should stay inside.
+   *
+   * It is NOT the fire gate. `turret.fireOpenCap_deg` decides whether a shot is allowed and is
+   * a different, wider number. This is where a shot is still worth TAKING, and the two differ
+   * because the far edge of the legal sector is also the end of a pass: the mouth's usable
+   * width falls with the cosine of the bearing while the robot is simultaneously reversing, so
+   * the lead is solving for a velocity the ball will not have. Measured with every gate lifted,
+   * 260 shots: 94% landed at 0-20 deg off the opening, 100% at 20-35, 89% at 35-50, and 8% at
+   * 50-65 (tools/releasecheck.ts --why).
+   *
+   * Drawn from the UP CELL's mouth and re-aimed every frame, because a TIP swaps which CELL is
+   * up and the new one opens the other way -- a sector painted once would be pointing at a
+   * pocket that is no longer there.
+   */
+  setPatrolSector(
+    mouth: Vec3 | null,
+    normal: Vec3 | null,
+    halfAngleDeg: number,
+    innerRadius_m: number,
+    outerRadius_m: number,
+  ): void {
+    if (!this.showPatrolSector || !mouth || !normal || !(halfAngleDeg > 0)) {
+      if (this.patrolMesh) this.patrolMesh.visible = false;
+      return;
+    }
+    const half = (halfAngleDeg * Math.PI) / 180;
+    // Geometry only depends on the angle and the radii, so it is rebuilt when those change and
+    // not when the rocker tips -- the tip is a rotation, and a rotation is free.
+    const key = `${halfAngleDeg}|${innerRadius_m.toFixed(3)}|${outerRadius_m.toFixed(3)}`;
+    if (!this.patrolMesh || this.patrolKey !== key) {
+      if (this.patrolMesh) {
+        this.scene.remove(this.patrolMesh);
+        this.patrolMesh.geometry.dispose();
+        (this.patrolMesh.material as THREE.Material).dispose();
+      }
+      // Centred on the ring's own +X, so aiming it is one rotation about Y below.
+      const geo = new THREE.RingGeometry(innerRadius_m, outerRadius_m, 64, 1, -half, 2 * half);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x36a2c9, transparent: true, opacity: 0.16,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      // Ry(alpha) * Rx(-90): lay the ring flat, then swing its centre onto the mouth normal.
+      mesh.rotation.order = 'YXZ';
+      mesh.rotation.x = -Math.PI / 2;
+      // Above the shot-zone plane at 0.01 so the two do not fight for the same pixels.
+      mesh.position.y = 0.013;
+      mesh.renderOrder = 3;
+      this.patrolMesh = mesh;
+      this.patrolKey = key;
+      this.scene.add(mesh);
+    }
+    const n = Math.hypot(normal[0], normal[2]) || 1;
+    const nx = normal[0] / n;
+    const nz = normal[2] / n;
+    this.patrolMesh.position.x = mouth[0];
+    this.patrolMesh.position.z = mouth[2];
+    // Rx(-90) leaves local +X on world +X; Ry(alpha) then sends it to (cos a, 0, -sin a).
+    this.patrolMesh.rotation.y = Math.atan2(-nz, nx);
+    this.patrolMesh.visible = true;
   }
 
   /**

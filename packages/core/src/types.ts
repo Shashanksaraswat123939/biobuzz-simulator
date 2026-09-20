@@ -80,6 +80,12 @@ export interface RobotSpec {
      * there and is not worth taking -- see the note in BuiltinTeleOp.
      */
     minRange_in?: number;
+    /**
+     * Half-width of the patrol sector about the CELL's opening, degrees. A DRIVING guide, not a
+     * gate: `turret.fireOpenCap_deg` decides whether a shot is allowed, this decides where the
+     * robot should be. Drawn on the floor by the Patrol zone overlay.
+     */
+    patrolHalfAngle_deg?: number;
   };
   transfer: { motor: MotorSpec;
     /**
