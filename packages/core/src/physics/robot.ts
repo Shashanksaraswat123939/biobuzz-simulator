@@ -217,7 +217,13 @@ export class Robot {
     if (spec.turret.enabled) addMotor('turret', spec.turret.motor);
 
     this.servos.set('hood', { pos: 0.5, target: 0.5, speed: spec.hood.speed_dps / Math.max(1, spec.hood.angleRange_deg[1] - spec.hood.angleRange_deg[0]) });
-    this.servos.set('gate', { pos: 0, target: 0, speed: 4 });
+    // THE COMMIT-TO-RELEASE DELAY LIVES HERE. The gate travels 0 -> 1 at this rate, so a ball
+    // waiting on the plate leaves when the servo passes half travel: 0.125 s at 4 /s, which is
+    // the whole of the measured 0.13 s commit-to-release window (tools/releasecheck.ts). The
+    // shot is solved for where the robot IS and fired from where it has GOT TO, so with every
+    // other error removed the residual aim error at release is speed * this delay. Configurable
+    // so that claim can be measured rather than argued.
+    this.servos.set('gate', { pos: 0, target: 0, speed: spec.transfer.gateSpeed ?? 4 });
     this.hoodAngle = spec.hood.enabled ? mid(spec.hood.angleRange_deg) : spec.hood.fixedAngle_deg;
   }
 

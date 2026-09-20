@@ -878,7 +878,19 @@ export class BuiltinTeleOp {
     // Where the turret ACTUALLY is, from its encoder -- not where it was told to go. The
     // axis is acceleration limited, so a 137 deg swing takes most of a second, and firing
     // on the commanded angle means firing at nothing.
-    const turretActualDeg = s.motors.turret ? s.motors.turret.pos / ticksPerDeg : 0;
+    // ONE FRAME STALE, BY CONSTRUCTION. The sensor frame is built before the world steps, so
+    // the encoder the brain reads is always a loop old. At 60 Hz that is 16.7 ms, and during a
+    // reversal the required bearing moves 150-200 deg/s -- 2.5 to 3.3 deg, which is the whole
+    // of the 3 deg readiness window. The gate then refuses for "turret off target" on an axis
+    // that is exactly where it was told to be, and no slew rate can fix a measurement delay.
+    //
+    // `predictEncoder` carries the reading forward by the rate the encoder itself reports.
+    // That rate is measured over the hub's own 20 ms window and rounded to whole ticks, so it
+    // is not free of lag either; this closes most of the gap, not all of it.
+    const tSense = s.motors.turret;
+    const turretActualDeg = tSense
+      ? (tSense.pos + (this.spec.turret.predictEncoder ? tSense.vel * dt : 0)) / ticksPerDeg
+      : 0;
     // THE BALL INHERITS THE MUZZLE'S VELOCITY, NOT THE CHASSIS'S. omega x r, added to both
     // consumers of the velocity below: the lead that cancels it and the radial axis of the
     // hood table. Robot.launch() applies the matching term to the flight.
@@ -971,7 +983,19 @@ export class BuiltinTeleOp {
       this.aimEst += (bearingRate - s.localizer.omega) * dt;
       this.aimEst += wrapPi((raw - this.aimEst) * DEG) * RAD * 0.6;
       this.aimEst = wrapPi(this.aimEst * DEG) * RAD;
-      aimRawDeg = this.aimEst;
+      // WHAT THE READINESS GATE MEASURES THE AXIS AGAINST.
+      //
+      // `aimEst` is a one-pole (0.6) on the solution, and the COMMAND is a different one-pole
+      // (0.35) with a deadband. Two filters on one signal, so even a turret with infinite slew
+      // sitting exactly on its command carries a standing error of aimEst - aimHold, and that
+      // error grows with bearing rate. It is charged to the turret and no amount of slew rate
+      // can remove it (measured: 261 -> 1400 deg/s changes nothing).
+      //
+      // `gateOnRawAim` measures against the UNFILTERED solution instead, which is the honest
+      // reference when the signal is clean. It is off by default because with real localizer
+      // noise the raw solution jitters by about a degree and the gate would trip on noise --
+      // which is the fault aimEst was introduced to avoid.
+      aimRawDeg = this.spec.turret.gateOnRawAim ? raw : this.aimEst;
       const dead = this.spec.turret.aimDeadband_deg ?? 0.25;
       if (Math.abs(wrapPi((raw - this.aimHold) * DEG) * RAD) > dead) {
         const a = clamp(this.spec.turret.aimFilterAlpha ?? 0.35, 0.01, 1);
@@ -1437,7 +1461,13 @@ export class BuiltinTeleOp {
           ['hold', st.hold || 'clear']],
       };
     }
-    st.ready = st.readyCount >= f.readySteps && Math.abs(st.turretAimErrDeg) < 3
+    // HOW CLOSE THE AIM HAS TO BE BEFORE A SHOT IS ALLOWED. Was a hardcoded 3 degrees, which
+    // is loose: measured with an otherwise perfect robot, the 0.13 s the gate servo takes to
+    // open was quietly doing the fine settling this gate never demanded, and shortening the
+    // servo dropped the land rate from 98% to 78% (tools/releasecheck.ts --gatespeed). A
+    // criterion the shot actually depends on belongs in the gate, not in a servo's travel time.
+    const aimTol = this.spec.turret.fireAimTolDeg ?? 3;
+    st.ready = st.readyCount >= f.readySteps && Math.abs(st.turretAimErrDeg) < aimTol
       && st.turretPastStopDeg < 0.5 && tgt.fresh && !blocked && mouthOpen && accelOk && yawOk && aimPossible && leadOk;
 
     st.hold = !wheelOn ? ''
@@ -1452,7 +1482,7 @@ export class BuiltinTeleOp {
       : lead.outrun > 0.02 ? `moving sideways faster than the ball flies: ${lead.outrun.toFixed(2)} m/s over - SLOW DOWN or back off`
       : !aimPossible ? `no launch fits: the hood is ${lead.clamped.toFixed(0)} deg short of the shot this motion needs`
       : st.turretPastStopDeg >= 0.5 ? `turret cannot reach, ${st.turretPastStopDeg.toFixed(0)} deg past its stop`
-      : Math.abs(st.turretAimErrDeg) >= 3 ? `turret ${st.turretAimErrDeg.toFixed(0)} deg off`
+      : Math.abs(st.turretAimErrDeg) >= aimTol ? `turret ${st.turretAimErrDeg.toFixed(1)} deg off, tol ${aimTol}`
       // No cell is a real answer, not a failure: there is no hood angle that scores from here
       // at this closing speed, and saying so beats holding with an unexplained low number.
       : usingHood && !cell ? 'no shot from here at this speed'
@@ -1542,7 +1572,7 @@ export class BuiltinTeleOp {
     // gates by the time the ball actually went. The wheel floor deliberately stays out of
     // this (the doc's other half): the range is growing, so the rpm target moves under the
     // shot and a floor there refuses everything while changing nothing.
-    const stillGood = st.turretPastStopDeg < 0.5 && Math.abs(st.turretAimErrDeg) < 3
+    const stillGood = st.turretPastStopDeg < 0.5 && Math.abs(st.turretAimErrDeg) < aimTol
       && mouthOpen && probOk && haveShot;
     const mayFire = st.pulsing && stillGood;
     motors.transfer = { mode: 'RUN_WITHOUT_ENCODER', power: wheelOn ? 1 : 0 };

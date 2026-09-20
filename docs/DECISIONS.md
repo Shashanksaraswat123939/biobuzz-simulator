@@ -2142,3 +2142,77 @@ Did instead: Nothing to change in the robot: there is no per-speed policy to wri
              aim is already at its ceiling at every speed. --minshots, --bearing and the
              ball-to-ball histogram are recorded so the claim can be re-run.
 Who/where:   tools/releasecheck.ts, docs/STATUS.md, README.md
+
+## 2026-09-20 — Every gate is a flat line: the score does not depend on any threshold in this robot
+
+Plan said:   "I want the gate open high AND the accuracy high." Reasonable, and the first four
+             attempts to get it were all thresholds, and all of them failed the same way.
+
+Found:       tools/releasecheck.ts gained --perfect (every sensor, lag and ball variance off),
+             --emptycell (the pocket never fills) and a per-frame tally of WHY the gate is shut.
+             With a perfect robot at 1.00 m/s on the 40 in arc it is open 76%, and the refusals
+             are 12% "turning too fast" and 9% "turret off target", both at the reversal.
+
+             NOTHING BOUGHT ANYTHING. Each of these opens the gate and none changes seconds per
+             ball landed, which stays 0.75-0.83 s throughout:
+
+               turret 261 -> 1400 deg/s        76 -> 77% open, 98 -> 98% landed
+               + yaw cap 70 -> 400 deg/s       -> 83% open, 89% landed
+               + unfiltered turret command     -> 85% open, 83% landed
+               + gate on the raw solution      -> 88% open, 81% landed
+               + encoder prediction            -> 97% open, 77% landed
+               + aim window 3 -> 6 deg         -> 98% open, 78% landed
+
+             Gate 76 -> 98%, accuracy 98 -> 78%, s per ball IN 0.77 -> 0.78. The gate is very
+             nearly a perfect discriminator: the frames it refuses are the frames whose shots
+             miss, so no threshold can buy throughput from it.
+
+             THE 9% "TURRET OFF TARGET" IS A MEASUREMENT DELAY, NOT A MECHANISM. The sensor
+             frame is built before the world steps, so the encoder the brain reads is always one
+             loop old. At 60 Hz that is 16.7 ms, and a reversal moves the required bearing at
+             150-200 deg/s -- 2.5 to 3.3 deg against a 3 deg window. Carrying the reading
+             forward by its own reported rate takes that refusal from 9.4% to 0.9% and the gate
+             from 88% to 97%. It is why 5.4x of turret slew changed nothing: the turret was
+             never what the gate was measuring.
+
+             The gate was ALSO charging the turret for a filter mismatch: the command is a
+             one-pole at 0.35 with a deadband, the gate compared the axis against a DIFFERENT
+             one-pole at 0.6, so even an infinite turret sitting exactly on its command carries
+             the difference, and it grows with bearing rate.
+
+             WHERE THE MISSES ACTUALLY ARE, with every gate lifted (260 shots):
+
+               0-20 deg off the opening   94%
+               20-35                     100%
+               35-50                      89%
+               50-65                       8%   <- 48 shots, 4 landed
+
+             Hits against misses, the three that separate: off-opening 26 vs 48 deg, lateral
+             speed at release 1.14 vs 0.41 m/s, and the CHANGE in lateral speed during the
+             0.13 s the ball is in the tube, 0.09 vs 0.40 m/s. The extreme bearing IS the end of
+             the pass, so the aperture is half shut (cos 55 = 0.57) at the same moment the lead
+             is solving for a velocity the ball will not have.
+
+Did instead: Nothing to the shipping gate, because there is nothing there to win. The lever is
+             the ROUTE. Stock robot, real noise, pocket filling, gate untouched at 60 deg,
+             varying only how far down the sector the patrol drives:
+
+               patrol +-60 deg (current)   66% landed   1.19 s per ball IN
+               patrol +-45 deg             73% landed   0.97 s per ball IN
+               patrol +-35 deg             67% landed   1.27 s per ball IN
+
+             +-45 deg is worth 7 points of accuracy and 18% more balls scored per second, with
+             no code and no config change. +-35 is worse because a shorter pass is proportionally
+             more reversing and the achieved speed falls to 0.91 m/s.
+
+Costs/risks: 80-90 shots a row on the route table, so 0.97 against 1.19 is real and the exact
+             optimum is not. About 300 balls a row would pin it. The four new config fields all
+             default to the existing behaviour and none is on: transfer.gateSpeed (was a
+             hardcoded 4, and it IS the 0.13 s commit-to-release window), turret.fireAimTolDeg
+             (was a hardcoded 3), turret.gateOnRawAim and turret.predictEncoder (both
+             diagnostic, and both measured to be worth nothing at the bottom line on the real
+             robot: encoder prediction halves the false refusal, 10.9% to 6.9%, and scores
+             1.19 s per ball either way).
+Who/where:   tools/releasecheck.ts (--perfect, --emptycell, --straight, --nosealong, --reach,
+             --pathcap, --opencap, --why and the refusal tally), packages/core/src/types.ts,
+             packages/core/src/robot/builtinTeleOp.ts, packages/core/src/physics/robot.ts

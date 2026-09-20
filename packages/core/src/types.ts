@@ -93,6 +93,8 @@ export interface RobotSpec {
     /** Inside width of the feed tube, m. Must pass a NECTAR and refuse two POLLEN on the diagonal. */
     boreSize_m?: number;
     cycleTime_s: number; feedPulse_s: number; feedTransit_s: number;
+    /** Gate servo travel rate, position units per second. Sets the commit-to-release delay. */
+    gateSpeed?: number;
     /** Fraction of the indexer's push that acts UPWARD, as a real indexer wheel does. */
     indexLift?: number;
     /** Feed belt drive pulley radius: belt speed is motor omega times this. */
@@ -107,6 +109,12 @@ export interface RobotSpec {
     fireYawCap_dps?: number;
     /** Hold fire when the motion lead exceeds this: the shot is mostly chassis, not launch. */
     fireLeadCap_deg?: number;
+    /** How close the aim must be before a shot is allowed, degrees. Default 3. */
+    fireAimTolDeg?: number;
+    /** Gate on the UNFILTERED aim solution rather than the filtered estimate. Clean signals only. */
+    gateOnRawAim?: boolean;
+    /** Carry the one-frame-stale encoder reading forward by its reported rate before gating. */
+    predictEncoder?: boolean;
     /** Hold fire this far off the mouth's opening: the aperture closes with the cosine. */
     fireOpenCap_deg?: number;
     /**
