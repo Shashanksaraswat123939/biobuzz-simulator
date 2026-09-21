@@ -74,7 +74,7 @@ describe('the Variables sliders', () => {
  */
 describe('the pad-to-brain remap', () => {
   const pad = (over: Partial<GamepadState> = {}): GamepadState => ({ ...emptyGamepad(), ...over });
-  const none: Paddles = { m1: false, m2: false, rezero: false };
+  const none: Paddles = { m1: false, m2: false, fire: false, rezero: false };
 
   it('X and B become the yaw axis, opposite ways round, and nothing else moves', () => {
     const left = remap(pad({ x: true }), none);
@@ -111,9 +111,19 @@ describe('the pad-to-brain remap', () => {
     expect(plain.right_bumper).toBe(false);
   });
 
-  it('M1 and M2 nudge the turret, which the brain reads as the D-pad', () => {
-    expect(remap(pad(), { m1: true, m2: false, rezero: false }).dpad_left).toBe(true);
-    expect(remap(pad(), { m1: false, m2: true, rezero: false }).dpad_right).toBe(true);
+  it('the M1 paddle fires, on the same latch as R1', () => {
+    // Two buttons, ONE latch. The brain toggles on the edge of right_bumper, so folding the
+    // paddle in here rather than giving it its own field is what stops them fighting.
+    expect(remap(pad(), { ...none, fire: true }).right_bumper).toBe(true);
+    expect(remap(pad({ right_bumper: true }), none).right_bumper).toBe(true);
+    expect(remap(pad(), none).right_bumper).toBe(false);
+    // And firing must not also nudge the turret, which is what M1 used to do.
+    expect(remap(pad(), { ...none, fire: true }).dpad_left).toBe(false);
+  });
+
+  it('the turret nudge survives on M1 and M2 fallbacks, read as the D-pad', () => {
+    expect(remap(pad(), { ...none, m1: true }).dpad_left).toBe(true);
+    expect(remap(pad(), { ...none, m2: true }).dpad_right).toBe(true);
     // A real D-pad press is consumed as M1/M2's fallback upstream, so it must not arrive here
     // as a second, independent turret nudge.
     expect(remap(pad({ dpad_left: true }), none).dpad_left).toBe(false);
@@ -127,6 +137,13 @@ describe('the pad-to-brain remap', () => {
   it('every button the brain acts on is driven by exactly one physical control', () => {
     // One press, one action. The old layout had Y doing the auto-fill AND the drive frame,
     // and L3 doing pause AND the re-zero; both fired together and neither was discoverable.
+    //
+    // ONE DELIBERATE EXCEPTION: the auto-fire latch is on R1 and on the M1 paddle. That is a
+    // second way to reach the SAME control, not a second meaning for one button -- the fault
+    // this test exists to catch is a press doing two unrelated things at once. The brain
+    // toggles on the edge of right_bumper, so pressing both cannot double-toggle: the first
+    // flips it and the second is a no-op until both are released.
+    const sharedLatch = new Set(['right_bumper']);
     const sources: [string, GamepadState, Paddles][] = [
       ['X', pad({ x: true }), none], ['B', pad({ b: true }), none],
       ['Y', pad({ y: true }), none], ['A', pad({ a: true }), none],
@@ -136,9 +153,10 @@ describe('the pad-to-brain remap', () => {
       ['R3', pad({ right_stick_button: true }), none],
       ['D-pad up', pad({ dpad_up: true }), none],
       ['D-pad down', pad({ dpad_down: true }), none],
-      ['M1', pad(), { m1: true, m2: false, rezero: false }],
-      ['M2', pad(), { m1: false, m2: true, rezero: false }],
-      ['Backspace', pad(), { m1: false, m2: false, rezero: true }],
+      ['M1 paddle', pad(), { ...none, fire: true }],
+      ['turret nudge left', pad(), { ...none, m1: true }],
+      ['turret nudge right', pad(), { ...none, m2: true }],
+      ['Backspace', pad(), { ...none, rezero: true }],
     ];
     const watched = ['x', 'b', 'y', 'a', 'right_bumper', 'left_stick_button', 'right_stick_button',
       'dpad_up', 'dpad_left', 'dpad_right'] as const;
@@ -149,7 +167,11 @@ describe('the pad-to-brain remap', () => {
       if ((out.left_trigger as number) > 0) (hits.left_trigger ??= []).push(name);
     }
     for (const [field, from] of Object.entries(hits)) {
-      expect(from, `${field} is driven by ${from.join(' and ')}`).toHaveLength(1);
+      const allowed = sharedLatch.has(field) ? 2 : 1;
+      expect(from.length, `${field} is driven by ${from.join(' and ')}`).toBeLessThanOrEqual(allowed);
+      expect(from.length, `${field} is driven by nothing`).toBeGreaterThan(0);
     }
+    // And the exception is exactly the one named, not a licence for any field to grow drivers.
+    expect(hits.right_bumper?.sort()).toEqual(['M1 paddle', 'R1']);
   });
 });

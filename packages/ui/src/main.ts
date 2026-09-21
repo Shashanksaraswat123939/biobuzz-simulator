@@ -261,12 +261,26 @@ function gamepadState(): GamepadState {
   }
   const dz = (v: number) => (Math.abs(v) < 0.09 ? 0 : v);
   const btn = (i: number) => g.buttons[i]?.pressed ?? false;
+  // WHAT DOES YOUR PAD ACTUALLY REPORT? Paddles are not standardised: an Xbox Elite ships
+  // with its paddles MIRRORING the face buttons, so "M1" arrives as button 0 (A) and not as
+  // the index 16 this layout assumes -- which is why the paddle changed the speed gear
+  // instead of firing. Both indices fire now; the console still prints what is pressed.
+  padWatch(g);
   // M1/M2 sit past the standard 17 on the pads that have them. On a pad that does not, they
   // fall back to D-pad left and right -- which is where the manual turret nudge lived before,
   // so nothing is lost and nothing is doubled up.
   const paddles: Paddles = {
-    m1: btn(16) || btn(14) || k.paddles.m1,
+    // THE M1 PADDLE FIRES; ITS FALLBACKS STILL NUDGE. btn(16) used to be OR'd into m1 with
+    // D-pad left and the comma key, so binding "M1" to the latch would have taken the
+    // anticlockwise turret nudge away from every pad without paddles as well. The paddle is
+    // split out instead: 16 fires, 14 and comma go on nudging.
+    m1: btn(14) || k.paddles.m1,
     m2: btn(17) || btn(15) || k.paddles.m2,
+    // 16 IS THE PADDLE BLOCK; 0 IS THE SAME PADDLE MIRRORING A. A pad that mirrors reports
+    // nothing on 16 at all, so reading both costs a pad with real paddles nothing and is the
+    // only binding a mirrored one can have. Gear-down moves off A on the pad because of it:
+    // Y wraps round instead, and R/F on the keyboard are untouched.
+    fire: btn(16) || btn(0),
     rezero: k.paddles.rezero,
   };
   const merged: GamepadState = {
@@ -277,7 +291,7 @@ function gamepadState(): GamepadState {
     // L2 and R2 are the back and forward throttles now, read as the analog values they are.
     left_trigger: Math.max(g.buttons[6]?.value ?? 0, k.left_trigger),
     right_trigger: Math.max(g.buttons[7]?.value ?? 0, k.right_trigger),
-    a: (g.buttons[0]?.pressed ?? false) || k.a,
+    a: k.a,   // read above as the fire paddle: a mirrored M1 arrives here
     b: (g.buttons[1]?.pressed ?? false) || k.b,
     x: (g.buttons[2]?.pressed ?? false) || k.x,
     y: (g.buttons[3]?.pressed ?? false) || k.y,
@@ -948,9 +962,10 @@ interface Action { label: string; title: string; run: () => void; on?: () => boo
 const DECK: Record<Mode, Action[]> = {
   practice: [
     { label: 'Auto-aim (L1)', title: 'Turret and hood solve for the CELL continuously, including a lead for the robot’s own motion. Off, the , and . keys aim it by hand. L1 on the pad, T on the keyboard — M1 and M2 are the manual nudge, not this.', run: () => (brain.state.autoAim = !brain.state.autoAim), on: () => brain.state.autoAim },
-    { label: 'Auto-fire (R1)', title: 'Latch. Spins the flywheel, waits for it to be in tolerance and the turret to be on target, then feeds at the cycle time until you press it again. R1 on the pad, space on the keyboard. L3 (G) fires by hand instead, for as long as you hold it.', run: () => (brain.state.firing = !brain.state.firing), on: () => brain.state.firing },
+    { label: 'Auto-fire (R1)', title: 'Latch. Spins the flywheel, waits for it to be in tolerance and the turret to be on target, then feeds at the cycle time until you press it again. R1 or the M1 paddle on the pad, space on the keyboard. L3 (G) fires by hand instead, for as long as you hold it.', run: () => (brain.state.firing = !brain.state.firing), on: () => brain.state.firing },
     { label: 'FLOWER lob', title: 'Aim at the nearest FLOWER and lob into the top of its tube instead of shooting the CELL. A different table: hood 57-80 deg at about 1200 rpm, a third of the CELL shot. The tube is a 4.0 in hole for a 2.8 in ball, so stand 12-16 in off it -- closer and the bumper is against the column, further and the lob runs out of hood.', run: () => (brain.state.flowerMode = !brain.state.flowerMode), on: () => brain.state.flowerMode },
     { label: 'Opponent', title: 'Put a real robot on the other alliance and play against it. It collects, lines up on its own CELL’s opening, fires through the same readiness gate you do, tips its own HIVE and PARKs at the buzzer — driving a real chassis through a real brain, so nothing it does is something you could not. Toggling it rebuilds the match.', run: () => { opponentOn = !opponentOn; build(); }, on: () => opponentOn },
+    { label: 'Empty hopper', title: 'Practice aid: set down everything the robot is carrying, on the tiles behind it so the intake does not swallow it again on the next frame. The balls stay IN PLAY rather than being deleted — 40 POLLEN is a fixed budget and the HIVE only tips when enough of them are in a CELL, so a button that ate four would change the game and not just the robot.', run: () => emptyHopper() },
     { label: 'Auto-fill hopper', title: 'Practice aid, not a game rule: quietly picks up the nearest POLLEN off the floor whenever the hopper has room, so you can work on aiming without driving a collection lap.', run: () => setAutoLoad(!autoLoad), on: () => autoLoad },
     { label: 'Joystick', title: 'On-screen sticks: left translates, right looks around. They feed the same gamepad frame the keyboard and a real controller do, so a phone or a trackpad can drive without either.', run: () => (sticks.visible = !sticks.visible), on: () => sticks.visible },
     { label: 'Shot zone', title: 'Green where a perfectly aimed shot clears the land-probability gate, red where it does not, using the hood and rpm the table commands at that range and the CELL mouth as seen from that spot. A MODEL map (tools/shotzone.ts), not a record of what this robot has hit.', run: () => (scene.showShotZone = !scene.showShotZone), on: () => scene.showShotZone },
@@ -969,6 +984,7 @@ const DECK: Record<Mode, Action[]> = {
   collect: [
     { label: 'Shots: 20', title: 'How many samples this run collects. Below about 20 the statistics are noise.', run: () => { plan.shots = plan.shots >= 80 ? 20 : plan.shots + 20; }, },
     { label: 'Moving', title: 'Fire while still rolling instead of settling first. This is what the motion lead exists for, and the difference between the two runs tells you whether it works.', run: () => (plan.onTheMove = !plan.onTheMove), on: () => plan.onTheMove },
+    { label: 'Empty hopper', title: 'Practice aid: set down everything the robot is carrying, on the tiles behind it so the intake does not swallow it again on the next frame. The balls stay IN PLAY rather than being deleted — 40 POLLEN is a fixed budget and the HIVE only tips when enough of them are in a CELL, so a button that ate four would change the game and not just the robot.', run: () => emptyHopper() },
     { label: 'Auto-fill hopper', title: 'Required for a long run: the robot only carries a few balls and the sweep needs more.', run: () => setAutoLoad(!autoLoad), on: () => autoLoad },
     { label: 'Speed: 1x', title: 'Sim seconds per real second. The physics step never changes, so a 16x run gives exactly the same trajectories as a 1x one — it just does not make you watch.', run: () => cycleTurbo(), on: () => turbo > 1 },
     { label: 'Pause', title: 'Freeze the physics mid-run. Resuming continues the same plan.', run: () => togglePause(), on: () => paused },
@@ -977,6 +993,7 @@ const DECK: Record<Mode, Action[]> = {
   test: [
     { label: 'Auto-aim (L1)', title: 'Turret and hood solve for the CELL continuously. Off, the , and . keys aim it by hand.', run: () => (brain.state.autoAim = !brain.state.autoAim), on: () => brain.state.autoAim },
     { label: 'Auto-fire (R1)', title: 'Latch. Spins up and feeds at the cycle time until pressed again. L3 fires by hand.', run: () => (brain.state.firing = !brain.state.firing), on: () => brain.state.firing },
+    { label: 'Empty hopper', title: 'Practice aid: set down everything the robot is carrying, on the tiles behind it so the intake does not swallow it again on the next frame. The balls stay IN PLAY rather than being deleted — 40 POLLEN is a fixed budget and the HIVE only tips when enough of them are in a CELL, so a button that ate four would change the game and not just the robot.', run: () => emptyHopper() },
     { label: 'Auto-fill hopper', title: 'Keeps the hopper topped up from the floor so a test run does not stop for ammunition.', run: () => setAutoLoad(!autoLoad), on: () => autoLoad },
     { label: 'Drop a POLLEN in the CELL', title: 'Places one POLLEN into your up CELL by hand. The quickest way to watch the HIVE tip: it takes 12.', run: () => dropBall() },
     { label: 'Shot arc', title: 'Two curves. YELLOW is the prediction: what the solver says the shot the aim is lining up will do, drawn with the same integrator the shot table is built from. It is hidden while the camera is searching, because then there is no shot being lined up. BLUE is the trail the last ball actually flew. When they lie on top of each other the model is right; where they part company is the thing worth chasing.', run: () => (scene.showTrajectory = !scene.showTrajectory), on: () => scene.showTrajectory },
@@ -1226,6 +1243,30 @@ function download(kind: string, text: string): void {
   URL.revokeObjectURL(a.href);
 }
 
+/**
+ * Print which gamepad button indices are down, once per change.
+ *
+ * Exists because paddle numbering is not standardised and the only reliable way to learn a
+ * pad's mapping is to press the button and look. Console only: it is a setup aid, not a
+ * readout anybody needs while driving.
+ */
+let padSeen = '';
+function padWatch(g: Gamepad): void {
+  const down = g.buttons.map((b, i) => (b.pressed ? i : -1)).filter((i) => i >= 0);
+  const key = down.join(',');
+  if (key === padSeen) return;
+  padSeen = key;
+  const NAMES: Record<number, string> = {
+    0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'L1', 5: 'R1', 6: 'L2', 7: 'R2',
+    8: 'back', 9: 'start', 10: 'L3', 11: 'R3',
+    12: 'D-pad up', 13: 'D-pad down', 14: 'D-pad left', 15: 'D-pad right',
+    16: 'paddle 16', 17: 'paddle 17', 18: 'paddle 18', 19: 'paddle 19',
+  };
+  console.log(down.length
+    ? `[pad] pressed: ${down.map((i) => `${i} (${NAMES[i] ?? '?'})`).join(', ')}`
+    : '[pad] released');
+}
+
 function setAutoLoad(on: boolean): void {
   autoLoad = on;
 }
@@ -1307,6 +1348,38 @@ function topUpHopper(): void {
   }
   const take = best ?? spare;
   if (take) world.robot.preload(world.balls, take);
+}
+
+/**
+ * Practice aid, the inverse of topUpHopper: put down everything the robot is carrying.
+ *
+ * THE BALLS STAY IN PLAY. Parking them would be simpler and it would quietly delete scoring
+ * elements from the match -- 40 POLLEN is a fixed budget and the HIVE only goes over when
+ * enough of them are in a CELL, so a button that eats four of them changes the game rather
+ * than the robot. They are set down on the tiles instead, where an intake could pick them up
+ * again.
+ *
+ * BEHIND the robot, not in front. The intake runs continuously (a real one does), so anything
+ * dropped at the mouth is swallowed on the next frame and the button looks broken.
+ */
+function emptyHopper(): void {
+  const r = world.robot;
+  const held = r.heldBalls();
+  if (!held.length) return;
+  const back = robotSpec.chassis.length_m / 2 + 0.26;
+  const lim = world.geom.halfWidth_m - 0.25;
+  held.forEach((b, i) => {
+    // Fanned out by more than a ball's width: two released into the same spot are two bodies
+    // starting inside each other, which the contact solver answers by firing them apart.
+    const across = (i - (held.length - 1) / 2) * (b.radius * 2.4);
+    const w = r.toWorld([across, 0, -back]);
+    const at: Vec3 = [
+      Math.max(-lim, Math.min(lim, r.pos[0] + w[0])),
+      b.radius + 0.005,
+      Math.max(-lim, Math.min(lim, r.pos[2] + w[2])),
+    ];
+    world.balls.release(b, at, [0, 0, 0], [0, 0, 0], 'free');
+  });
 }
 
 function paintBrain(): void {

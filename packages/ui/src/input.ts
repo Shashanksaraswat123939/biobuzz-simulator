@@ -40,6 +40,12 @@ export interface Paddles {
   m1: boolean;
   m2: boolean;
   /**
+   * The M1 paddle, on the auto-fire latch. Separate from `m1` because m1's fallbacks -- D-pad
+   * left and the comma key -- still nudge the turret, and a pad without paddles must not lose
+   * that control just because a pad with them gained a second way to shoot.
+   */
+  fire: boolean;
+  /**
    * Re-zero the field frame. Keyboard only: every one of the pad's 17 standard buttons now
    * has a job, and inventing an 18th to put this on would be a button nobody's pad has.
    * R3 gives field-centric on demand, so this is the rare correction rather than the control.
@@ -85,7 +91,8 @@ export function readKeyboard(keys: Keys): GamepadState & { paddles: Paddles } {
   // the drive frame silently stuck in the mode you are not in.
   g.right_stick_button = on('c');
   // M1 / M2: nudge the turret anticlockwise and clockwise.
-  g.paddles = { m1: on(','), m2: on('.'), rezero: keys.pressed.has('backspace') };
+  // No keyboard equivalent for the fire paddle: space already is the latch.
+  g.paddles = { m1: on(','), m2: on('.'), fire: false, rezero: keys.pressed.has('backspace') };
   return g;
 }
 
@@ -100,9 +107,10 @@ export function readKeyboard(keys: Keys): GamepadState & { paddles: Paddles } {
  *   R2 / L2      forward / back         X / B        turn left / right
  *   Y / A        speed gear up / down   R1           auto-fire latch
  *   L1           auto-aim toggle        L3           fire while held
- *   M1 / M2      turret anti/clockwise  R3           hold for field-centric
+ *   M1           auto-fire latch        M2           turret clockwise
+ *   R3           hold for field-centric
  *   D-pad up     pre-spin the flywheel  D-pad down   reverse the intake
- *   D-pad left/right are M1 and M2's fallback on a pad without paddles.
+ *   D-pad left/right nudge the turret anti/clockwise on a pad without paddles.
  *
  * Turning moved off the right stick because the right stick moves the camera, and the brain's
  * yaw command is still `right_stick_x` -- so X/B are synthesised into it here, BEFORE the
@@ -123,7 +131,10 @@ export function remap(phys: GamepadState, pad: Paddles): GamepadState {
     // set by the transfer cycle, not by how fast you can tap -- so the trigger that felt
     // like the main one was the one that could not keep up with the hardware. Holding it
     // by hand is still there, moved to L3.
-    right_bumper: phys.right_bumper,        // R1: auto-fire latch
+    // R1 OR THE M1 PADDLE. One latch, two buttons: the brain toggles on the EDGE of this, so
+    // the two cannot fight -- whichever is pressed first flips it and the other is a no-op
+    // until both are released.
+    right_bumper: phys.right_bumper || pad.fire,   // R1 / M1: auto-fire latch
     b: phys.left_stick_button,              // L3: fire while held
     left_bumper: false,              // the crawl button is gone; the speed gear replaced it
     left_trigger: phys.dpad_down ? 1 : 0,   // D-pad down: reverse the intake

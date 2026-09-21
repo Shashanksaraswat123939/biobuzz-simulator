@@ -621,7 +621,10 @@ export class BuiltinTeleOp {
       // have to keep a thumb on: the gear survives letting go of the stick, which is what
       // "crawl for the last six inches, then go" actually needs. The hold-to-crawl bumper is
       // still there on top of it for a momentary dab.
-      if (edge(g.y, p.y)) st.speedScale = gear(st.speedScale + SPEED_STEP);
+      // Y WRAPS AT THE TOP. A controller whose M1 paddle mirrors A has no gear-down button
+      // left once the paddle fires, so one button has to walk the whole ladder: top gear plus
+      // one goes back to the bottom. The keyboard keeps R up and F down.
+      if (edge(g.y, p.y)) st.speedScale = st.speedScale >= 1 ? SPEED_STEP : gear(st.speedScale + SPEED_STEP);
       if (edge(g.a, p.a)) st.speedScale = gear(st.speedScale - SPEED_STEP);
       if (edge(g.dpad_up, p.dpad_up)) st.flywheelOn = !st.flywheelOn;
       if (edge(g.x, p.x)) st.autoAim = !st.autoAim;
