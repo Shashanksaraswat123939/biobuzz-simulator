@@ -2216,3 +2216,26 @@ Costs/risks: 80-90 shots a row on the route table, so 0.97 against 1.19 is real 
 Who/where:   tools/releasecheck.ts (--perfect, --emptycell, --straight, --nosealong, --reach,
              --pathcap, --opencap, --why and the refusal tally), packages/core/src/types.ts,
              packages/core/src/robot/builtinTeleOp.ts, packages/core/src/physics/robot.ts
+
+## 2026-09-22 — One flywheel motor, because the heavy wheel already bought what the second one sold
+Plan said:   Two motors on the flywheel (2026-09-17 above), and a port freed by putting the
+             turret on a servo to pay for it.
+Found:       The case for the second motor was measured against the BARE grip wheel, before the
+             wheel became a 339 g stack. Re-measured at the shipped 3.91e-4 kg.m^2 with
+             tools/spinup.ts, to inside the 60 rpm readiness window: spin-up 1.52 s on one motor
+             against 0.98 s on two; recovery from a POLLEN 0.17 s against 0.12 s. Both hold the
+             speed -- one motor settles at 2259 rpm on a 2315 command, two at 2251 -- so the
+             sustained speed was never what the second motor was for. And the DIP is identical on
+             one motor and two at every inertia, because it is lossFactor*KE/(I*omega) and the
+             motor count is not in it: 199 rpm on the bare wheel, 64 at the shipped inertia,
+             29 at 9e-4. Inertia fixes the dip; motors only fix the climb back.
+Did instead: SHIPPED motorCount 1 and dropped flywheelB from the hardware map, which puts the
+             robot on seven motors with a port free.
+Costs/risks: It costs SHOTS, not accuracy. tools/movingtune.ts over the same eleven cases: 102
+             moving shots at 81% in on two motors, 84 at 80% on one -- 18% fewer, same quality.
+             They come out of the receding cases, exactly where 2026-09-17 said they would:
+             "receding 0.25" is clear to fire on 100% of loops with two motors and 52% with one,
+             27% of them settling. If the freed port is not spent on something worth more than
+             18% of the firing rate, put the motor back.
+Who/where:   tools/spinup.ts (new), tools/movingtune.ts; config/robot.json flywheel.motorCount
+             and hardware, tests/rules.test.ts counts the ports
