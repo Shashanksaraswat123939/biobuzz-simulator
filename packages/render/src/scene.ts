@@ -5,6 +5,10 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 // `?url` so Vite treats the 12 MB STEP tessellation as an asset instead of trying to parse
 // it as a module (which serves a 200 that GLTFLoader cannot read).
 /**
@@ -43,10 +47,16 @@ const COL = {
   robot: 0x5b6470,
   flower: 0x4bbf8a,
   zone: 0xffffff,
-  // the practice room the field stands in
-  roomFloor: 0x2a9db0,
-  roomFloorAlt: 0x2690a2,
+  // THE ROOM THE FIELD STANDS IN, which used to be a lit gymnasium in teal and is now the
+  // dark hall the game animation shows: the field is the only lit thing in it. Nothing here
+  // is decoration -- a dark surround is what lets the alliance colours and the POLLEN read at
+  // a glance, and a bright one washed all three towards the same pale grey.
+  roomFloor: 0x121a28,
+  roomFloorAlt: 0x0f1724,
 };
+
+/** The void the hall sits in. Used for the background, the fog and the tone of the lights. */
+const VOID = 0x070c16;
 
 export type CameraMode = 'orbit' | 'follow' | 'top' | 'muzzle' | 'fpv';
 
@@ -224,6 +234,10 @@ export class Scene {
   private colliderMeshes: THREE.Object3D[] = [];
   /** Stand-in geometry, shown only until the CAD arrives (or if it never does). */
   private proceduralMeshes: THREE.Object3D[] = [];
+  /** Post chain, used only while `bloom` is on. */
+  private composer: EffectComposer | null = null;
+  /** Soft halo on everything emissive. Off is a plain forward render. */
+  bloom = true;
   /** CAD geometry, once assets/field.glb has loaded. */
   private cadRockers: (THREE.Object3D | null)[] = [null, null];
   private orbit = { theta: -Math.PI / 2, phi: 1.0, dist: 6.5, target: new THREE.Vector3(0, 0.7, 0) };
@@ -254,26 +268,69 @@ export class Scene {
   ) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.scene.background = new THREE.Color(0xd8dde3);
-    this.scene.fog = new THREE.Fog(0xd8dde3, 26, 46);
+    // ACES AND REAL SHADOWS. The old view was linear-clamped and shadowless, which is why
+    // every saturated plastic went chalky at the top end and why nothing on the field had
+    // any weight -- a robot with no contact shadow floats above the tiles however carefully
+    // its height is computed. Exposure is a touch over 1 so the tone curve's shoulder does
+    // the highlight work instead of the clamp.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.scene.background = new THREE.Color(VOID);
+    this.scene.fog = new THREE.Fog(VOID, 14, 40);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
     this.camera.position.set(0, 3, 6);
 
-    // Indoor lighting: a bright ceiling bounce plus two soft overheads. No coloured rims --
-    // this is a gymnasium, and the shapes should read by their own colour.
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9199, 1.5));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.35);
-    sun.position.set(6, 12, 7);
+    // ONE LIGHT DOES THE WORK, and the rest only stop the shadows going black. A flat three
+    // point rig lit every face the same and the field read as a diagram; a single high key
+    // with a cool bounce under it gives every edge a light side and a dark side, which is
+    // what makes a shape legible at a glance while driving.
+    this.scene.add(new THREE.HemisphereLight(0x9ec1ff, 0x0a1220, 0.85));
+    const sun = new THREE.DirectionalLight(0xfff4e6, 2.6);
+    sun.position.set(5.5, 11, 6.5);
+    sun.castShadow = true;
+    // The shadow camera is sized to the FIELD, not to the room. A frustum wide enough for
+    // the hall spreads 2048 texels over 30 m and the contact shadow under a robot -- the one
+    // shadow that matters -- turns into a grey smudge.
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 2;
+    sun.shadow.camera.far = 26;
+    const half = 4.2;
+    sun.shadow.camera.left = -half;
+    sun.shadow.camera.right = half;
+    sun.shadow.camera.top = half;
+    sun.shadow.camera.bottom = -half;
+    sun.shadow.bias = -0.0008;
+    sun.shadow.normalBias = 0.02;
     this.scene.add(sun);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.55);
-    fill.position.set(-7, 8, -6);
+    const fill = new THREE.DirectionalLight(0x6f9bff, 0.7);
+    fill.position.set(-7, 5, -6);
     this.scene.add(fill);
+    // A rim from behind the audience side, so a robot silhouetted against the dark hall still
+    // has an edge. Weak on purpose: at full strength it reads as a second sun.
+    const rim = new THREE.DirectionalLight(0xbcd7ff, 0.55);
+    rim.position.set(0, 2.5, -9);
+    this.scene.add(rim);
+
+    // BLOOM, ON THE THINGS THAT CARRY THEIR OWN LIGHT. The POLLEN, the CELL frames and the
+    // zone paint have emissive; in a dark hall a soft halo on those is the difference between
+    // a lit field and a flat one. Threshold is high and strength low on purpose -- enough to
+    // see a ball in the air, not enough to smear the numbers on a panel.
+    //
+    // It is a TOGGLE and it is the first thing to turn off if a laptop struggles: it costs a
+    // full-resolution pass plus five downsamples every frame.
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1024, 576), 0.42, 0.65, 0.82));
+    this.composer.addPass(new OutputPass());
 
     this.buildRoom();
     this.buildField();
     this.buildHives();
     this.buildRobot();
+    this.castAndReceive();
 
     // One material per ball kind, so the colour code is unmistakable:
     // POLLEN yellow, red NECTAR red, blue NECTAR blue.
@@ -281,8 +338,12 @@ export class Scene {
     const ballMat: Record<string, THREE.Material> = {};
     for (const [kind, colour] of [['pollen', COL.pollen], ['nectarRed', COL.red], ['nectarBlue', COL.blue]] as const) {
       ballMat[kind] = new THREE.MeshStandardMaterial({
-        color: colour, roughness: 0.38, metalness: 0.0,
-        emissive: colour, emissiveIntensity: kind === 'pollen' ? 0.10 : 0.16,
+        color: colour, roughness: 0.32, metalness: 0.0,
+        // BRIGHTER AGAINST A DARK HALL. These were 0.10/0.16 against a near-white background
+        // where anything more looked radioactive; in the dark room a ball reads as a hole
+        // unless it carries a little of its own light, which is also how the game animation
+        // draws them.
+        emissive: colour, emissiveIntensity: kind === 'pollen' ? 0.34 : 0.42,
         // The hole pattern shades the surface instead of cutting it away: opaque, single
         // sided, properly lit. Transparency on a 35 mm ball at this distance was noise.
         map: holes,
@@ -292,6 +353,7 @@ export class Scene {
       // 32x24 rather than 20x14: at 35 mm across, a coarse sphere reads as a faceted lump the
       // moment it is anywhere near the camera, and the triangles are free at this count.
       const m = new THREE.Mesh(new THREE.SphereGeometry(b.r, 32, 24), ballMat[b.kind] ?? ballMat.pollen);
+      m.castShadow = true;
       this.ballMeshes.push(m);
       this.scene.add(m);
     }
@@ -970,11 +1032,23 @@ export class Scene {
       g.position.set(alliance === 'red' ? g0.hiveX_m.red : g0.hiveX_m.blue, g0.pivotY_m, 0);
       const colour = alliance === 'red' ? COL.red : COL.blue;
 
-      const skin = new THREE.MeshStandardMaterial({
-        color: colour, roughness: 0.45, metalness: 0.1,
-        transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+      // THE CELL SKIN IS A TINTED PANEL, not a block of alliance colour. The real part is a
+      // translucent white polycarbonate wall in a coloured frame, which is what the game
+      // animation shows and what makes a ball INSIDE a CELL visible from outside it; at
+      // opacity 0.55 in full alliance colour the pocket was a solid slab and the balls in it
+      // disappeared, which is the one thing a driver has to be able to count.
+      const skin = new THREE.MeshPhysicalMaterial({
+        color: 0xdde8f4, roughness: 0.22, metalness: 0.0,
+        transparent: true, opacity: 0.30, side: THREE.DoubleSide,
+        transmission: 0.35, thickness: 0.01, clearcoat: 0.6, clearcoatRoughness: 0.25,
+        emissive: colour, emissiveIntensity: 0.10,
       });
-      const ribMat = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.4, metalness: 0.15, side: THREE.DoubleSide });
+      // The frame keeps the alliance colour, and carries a little of its own light so the
+      // outline of a CELL still reads across the field in a dark hall.
+      const ribMat = new THREE.MeshStandardMaterial({
+        color: colour, roughness: 0.35, metalness: 0.15, side: THREE.DoubleSide,
+        emissive: colour, emissiveIntensity: 0.25,
+      });
       const alu = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.75, roughness: 0.3 });
 
       const wire = new THREE.MeshBasicMaterial({ color: 0x67e8f9, wireframe: true });
@@ -1334,6 +1408,30 @@ export class Scene {
     return { group: _group, turret: _turret, hood: _hood, flywheel: _flywheel, roller: _roller, wheels: _wheels };
   }
 
+  /**
+   * WHO CASTS AND WHO RECEIVES, decided once rather than per mesh at build time.
+   *
+   * Everything receives, because a shadow that stops at the edge of the tiles looks like a
+   * bug. Only the things that stand ON the field cast: the floor of the hall casting into
+   * itself buys nothing and doubles the shadow pass, and the CAD field at 350k triangles is
+   * the single most expensive thing that could be in it. The robot, the balls, the HIVEs and
+   * the FLOWERs are what a driver needs to place in space, and they are what cast.
+   */
+  private castAndReceive(): void {
+    this.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh && !(o as THREE.InstancedMesh).isInstancedMesh) return;
+      m.receiveShadow = true;
+      m.castShadow = false;
+    });
+    for (const g of [this.robotGroup, ...this.rockers]) {
+      g?.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.castShadow = true;
+      });
+    }
+  }
+
   private buildRobot(): void {
     const b = this.buildChassis(COL.robot);
     this.robotGroup = b.group;
@@ -1371,6 +1469,7 @@ export class Scene {
       this.intakeRoller = built.roller;
       this.wheelMeshes = built.wheels;
       this.playerSkin = name;
+      built.group.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       this.scene.add(built.group);
       return;
     }
@@ -1382,6 +1481,7 @@ export class Scene {
     this.opponentWheels = built.wheels;
     this.opponentRoller = built.roller;
     this.opponentSkin = name;
+    built.group.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
     this.scene.add(built.group);
   }
 
@@ -1684,12 +1784,14 @@ export class Scene {
     const h = this.canvas.clientHeight;
     if (w === 0 || h === 0) return;
     this.renderer.setSize(w, h, false);
+    this.composer?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
 
   render(): void {
-    this.renderer.render(this.scene, this.camera);
+    if (this.bloom && this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
   }
 }
 

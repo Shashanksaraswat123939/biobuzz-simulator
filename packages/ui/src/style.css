@@ -1,5 +1,7 @@
 /*
- * Flat, neutral, no glow.
+ * Dark, navy, and one glow -- see the :root note. It was FLAT, NEUTRAL, NO GLOW, and the
+ * first two of those still hold; the third gave way when the 3D view became a dark hall,
+ * because the only lit thing on the page should be the thing you are driving.
  *
  * One accent colour (orange) and it means exactly one thing: "this control is currently
  * on". Everything else is grey, and the only other colours on the page are the two
@@ -26,24 +28,30 @@
  */
 
 :root {
-  /* A ramp, not three greys that happen to differ. Each step is a surface level. */
-  --bg-0: #1a1e24;   /* deepest: chrome, wells, inputs */
-  --bg-1: #21262e;   /* bars */
-  --bg-2: #282e37;   /* panels */
-  --bg-3: #313945;   /* raised: buttons, hovered rows */
-  --line: #3a4350;
-  --line-soft: #2f3742;
+  /*
+   * THE RAMP WENT NAVY, and the reason is the 3D view rather than taste. The hall the field
+   * stands in is now the game animation's dark blue void instead of a lit gymnasium, and a
+   * neutral grey chrome around a blue-black picture reads as dirty -- the eye takes the
+   * larger area as the white point and calls the panels brown. Same ladder, same contrast
+   * ratios, hue rotated onto the picture it frames.
+   */
+  --bg-0: #0c121c;   /* deepest: chrome, wells, inputs */
+  --bg-1: #121a27;   /* bars */
+  --bg-2: #18212f;   /* panels */
+  --bg-3: #223047;   /* raised: buttons, hovered rows */
+  --line: #2c3a4f;
+  --line-soft: #223044;
 
-  --fg: #eef1f5;
-  --dim: #a7b3c2;    /* 6.1:1 on --bg-2. The old #94a0b0 was 4.3:1 and used at 10px. */
-  --faint: #7c8795;  /* captions only, never a value */
+  --fg: #eef3fa;
+  --dim: #a9b8cc;    /* 7.4:1 on --bg-2 */
+  --faint: #7e8da3;  /* captions only, never a value */
 
   --accent: #f5821f;
-  --accent-ink: #1b1f25;
-  --go: #4faa63;
-  --red: #e0453c;
-  --blue: #4b8bea;
-  --warn: #e0a53a;
+  --accent-ink: #14190f;
+  --go: #37c07a;
+  --red: #e8473e;
+  --blue: #4f93ff;
+  --warn: #f0b23c;
 
   --ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
@@ -81,7 +89,12 @@ html, body {
 #topbar {
   position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h);
   display: flex; align-items: center; gap: 16px; padding: 0 14px;
-  background: var(--bg-1); border-bottom: 1px solid var(--line-soft);
+  /* A hairline of light along the top edge and a shadow under the bar. Two pixels of depth,
+     which is what separates a bar FROM the picture instead of sitting in it. */
+  background: linear-gradient(180deg, #16202f 0%, var(--bg-1) 100%);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 6px 18px rgba(0, 0, 0, .35);
+  z-index: 3;
 }
 .brand { font-weight: 700; letter-spacing: .07em; font-size: 15px; white-space: nowrap; line-height: 1.1; }
 .brand small {
@@ -96,7 +109,10 @@ html, body {
   transition: background .12s, color .12s;
 }
 .seg button:hover { color: var(--fg); background: var(--bg-3); }
-.seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.seg button.on {
+  background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(245, 130, 31, .5), 0 2px 10px rgba(245, 130, 31, .28);
+}
 .seg button.on:hover { background: var(--accent); }
 
 .clock { display: flex; align-items: baseline; gap: 9px; white-space: nowrap; }
@@ -132,9 +148,14 @@ select:hover { border-color: #4a5566; }
 #status {
   position: absolute; top: calc(var(--bar-h) + 12px); left: 12px;
   display: flex; flex-direction: column;
-  background: rgba(26, 30, 36, .94); border: 1px solid var(--line); border-radius: var(--r);
+  /* Glass over the 3D view: the panel is a lens on the picture rather than a card lying on
+     top of it, which is the whole reason it may sit over the field at all. */
+  background: rgba(12, 18, 28, .72);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid rgba(120, 165, 225, .18); border-radius: 10px;
   padding: 0; min-width: 194px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .3);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5), 0 0 0 1px rgba(255, 255, 255, .03) inset;
 }
 .stat {
   display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
