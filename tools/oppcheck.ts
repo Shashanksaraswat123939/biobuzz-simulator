@@ -1,12 +1,19 @@
 /**
  * Does the OPPONENT actually play? One line per seed.
  *
- *   npm run tool -- tools/oppcheck.ts [--seeds 3]
+ *   npm run tool -- tools/oppcheck.ts [--seeds 3] [--motors 1]
  *
  * Plays a whole match with the human robot standing still and the bot doing its thing, then
  * reports what the bot managed on its own: shots away, balls in its up CELL, tips, and score.
  * A bot that scores nothing is a bot that is not worth practising against, and that is not a
  * question the browser can answer quickly -- a match takes two and a half minutes to watch.
+ *
+ * `--motors N` overrides flywheel.motorCount for the run, which makes this the only harness
+ * that answers what a motor is WORTH IN POINTS: same bot, same seeds, same everything else.
+ * It also reports the BATTERY at the buzzer and the drive speed in the last thirty seconds
+ * against the first thirty, because a shooter held on for two and a half minutes is a
+ * continuous current draw and the question of whether it starves the drive at the end is a
+ * real one.
  */
 import params from '../config/params.json' with { type: 'json' };
 import robotSpec from '../config/robot.json' with { type: 'json' };
@@ -27,11 +34,12 @@ const balls = (staging.balls as { kind: string; pos: number[] }[]).map((b) => ({
 
 let phaseT: Record<string, number> = {};
 let why: Record<string, number> = {};
-async function one(seed: number, trace = false) {
+async function one(seed: number, trace = false, motors?: number) {
   phaseT = {};
   why = {};
   const p = structuredClone(params) as unknown as Params;
   const spec = structuredClone(robotSpec) as unknown as RobotSpec;
+  if (motors) spec.flywheel.motorCount = motors;
   const world = new World({ params: p, robot: spec, staging: balls, alliance: 'red', seed, preload: spec.hopper.capacity, opponent: true });
   const oppBrain = new BuiltinTeleOp(spec, table, loadLandCal(), null, 'blue', flowerTbl);
   const bot = new OpponentBot();
@@ -41,6 +49,13 @@ async function one(seed: number, trace = false) {
   const ranges = table.rows.map((r) => r.range_in);
   const dt = p.sim.dt * p.sim.substepsPerFrame;
   world.clock.start();
+  // The BATTERY, sampled all match: amp-seconds out of the pack, and how fast the bot was
+  // actually managing to drive early against late. Speed is only counted while it is going
+  // somewhere (the collect and position phases), because a bot parked in front of the mouth
+  // is standing still by choice and would drag the average down at either end of the match.
+  let ampSeconds = 0;
+  const early: number[] = [];
+  const late: number[] = [];
   while (world.clock.period !== 'FINISHED') {
     const os = world.opponentSensors();
     const loose: [number, number][] = world.balls.balls
@@ -59,6 +74,12 @@ async function one(seed: number, trace = false) {
     world.setGamepads(emptyGamepad(), emptyGamepad());
     world.step({ seq: world.seq, motors: {}, servos: {} });
     phaseT[bot.phase] = (phaseT[bot.phase] ?? 0) + dt;
+    ampSeconds += world.opponentBattery!.amps * dt;
+    if (bot.phase === 'collect' || bot.phase === 'position') {
+      const v = Math.hypot(opp.vel[0], opp.vel[2]);
+      if (world.t < 40) early.push(v);
+      else if (world.clock.remaining < 30) late.push(v);
+    }
     // WHY IT IS NOT SHOOTING, while it is in the phase whose whole job is shooting. Numbers
     // collapsed out so "12 deg of lead" and "19 deg" are one answer.
     if (bot.phase === 'shoot') {
@@ -84,6 +105,10 @@ async function one(seed: number, trace = false) {
     leave: sc.leave, park: sc.park, upCell: sc.upCell, flower: sc.flower,
     garden: sc.garden, bottom: sc.bottomNectar,
     phaseT: { ...phaseT }, why: { ...why },
+    soc: world.opponentBattery!.soc, volts: world.opponentBattery!.volts,
+    ampHours: ampSeconds / 3600,
+    earlyV: early.length ? early.reduce((a, b) => a + b, 0) / early.length : NaN,
+    lateV: late.length ? late.reduce((a, b) => a + b, 0) / late.length : NaN,
   };
 }
 
@@ -91,11 +116,15 @@ export async function main(argv: string[] = []): Promise<void> {
   await initPhysics();
   const i = argv.indexOf('--seeds');
   const n = i >= 0 ? Number(argv[i + 1]) : 3;
+  const mi = argv.indexOf('--motors');
+  const motors = mi >= 0 ? Number(argv[mi + 1]) : undefined;
   console.log('\nTHE OPPONENT BOT, a full match per seed, with the human robot standing still.\n');
+  console.log(`  flywheel motors: ${motors ?? (robotSpec as unknown as RobotSpec).flywheel.motorCount ?? 1}
+`);
   console.log('  seed   shots   in its CELL   tips   points   ended');
   const runs: Awaited<ReturnType<typeof one>>[] = [];
   for (let k = 0; k < n; k++) {
-    const r = await one(11 + k * 17, argv.includes('--trace'));
+    const r = await one(11 + k * 17, argv.includes('--trace'), motors);
     runs.push(r);
     console.log(`  ${String(r.seed).padStart(4)}   ${String(r.shots).padStart(5)}   ${String(r.inCell).padStart(11)}   ${String(r.tips).padStart(4)}   ${String(r.score).padStart(6)}   ${r.phase}`);
   }
@@ -119,6 +148,11 @@ export async function main(argv: string[] = []): Promise<void> {
   for (const [k, v] of Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 6)) {
     console.log(`    ${((v / Math.max(1, tot)) * 100).toFixed(0).padStart(3)}%  ${k}`);
   }
+  console.log('');
+  console.log('  THE BATTERY, at the buzzer (3.0 Ah pack, flywheel up for most of the match):');
+  console.log(`    drawn       ${m((r) => r.ampHours)} Ah of 3.0   ->  ${(mean(runs.map((r) => r.soc)) * 100).toFixed(0)}% left, ${m((r) => r.volts)} V under load`);
+  console.log(`    drive speed ${m((r) => r.earlyV)} m/s in the first 40 s   ->  ${m((r) => r.lateV)} m/s in the last 30 s`);
+  console.log('    (speed counted only while the bot is driving somewhere, not while it sits and fires.)');
   console.log('');
   console.log('  seconds per phase, mean:');
   for (const k of new Set(runs.flatMap((r) => Object.keys(r.phaseT)))) {
