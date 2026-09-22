@@ -2231,7 +2231,15 @@ Found:       The case for the second motor was measured against the BARE grip wh
              29 at 9e-4. Inertia fixes the dip; motors only fix the climb back.
 Did instead: SHIPPED motorCount 1 and dropped flywheelB from the hardware map, which puts the
              robot on seven motors with a port free.
-Costs/risks: It costs SHOTS, not accuracy. tools/movingtune.ts over the same eleven cases: 102
+Costs/risks: It costs nothing on the scoreboard and some shots on the patrol harness.
+             tools/oppcheck.ts --motors, 40 full matches a side: 65.3 +- 17.6 points on one
+             motor, 65.9 +- 12.5 on two, difference -0.5 +- 3.4 (95% CI -7.2 to +6.1), and 32
+             shots a match either way. Twelve matches first read 7.4 points in one motor's
+             favour and that was noise -- the match-to-match spread is 25 to 101 points,
+             because a shot landing half a second earlier changes every ball after it. The
+             patrol number below is real and simply does not reach the score: a match is paced
+             by collecting (46 s) and repositioning (21 s), not by the wheel.
+             On the patrol harness it costs SHOTS, not accuracy. tools/movingtune.ts over the same eleven cases: 102
              moving shots at 81% in on two motors, 84 at 80% on one -- 18% fewer, same quality.
              They come out of the receding cases, exactly where 2026-09-17 said they would:
              "receding 0.25" is clear to fire on 100% of loops with two motors and 52% with one,
