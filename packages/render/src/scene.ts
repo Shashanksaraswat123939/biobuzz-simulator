@@ -29,6 +29,7 @@ import { inches, M_TO_IN, DEG } from '@core/units.js';
 import { pThread } from '@core/physics/ballistics.js';
 import { loadLandCal } from '@core/robot/loadCal.js';
 import type { RobotSpec, Snapshot, Vec3 } from '@core/types.js';
+import { loadPuppet, skinNames, type Puppet } from './robotPuppet.js';
 
 const COL = {
   tile: 0x39434f,
@@ -194,6 +195,11 @@ export class Scene {
   private opponentTurret: THREE.Group | null = null;
   private opponentHood: THREE.Mesh | null = null;
   private opponentFlywheel: THREE.Mesh | null = null;
+  /** The opponent's driven parts, once it is wearing a CAD skin rather than the box. */
+  private opponentWheels: THREE.Object3D[] = [];
+  private opponentRoller: THREE.Group | null = null;
+  playerSkin = 'box';
+  opponentSkin = 'box';
   private turretGroup = new THREE.Group();
   private hoodMesh!: THREE.Mesh;
   private wheelMeshes: THREE.Object3D[] = [];
@@ -1339,6 +1345,46 @@ export class Scene {
     this.scene.add(this.robotGroup);
   }
 
+  /** Which robot CAD can be worn. 'box' is the procedural one this file builds. */
+  static skins(): string[] {
+    return skinNames();
+  }
+
+  /**
+   * WEAR SOMEONE ELSE'S ROBOT. The handles the update loop drives -- turret, hood, flywheel,
+   * roller, wheels -- are rebound to the puppet's, so nothing downstream knows which robot is
+   * on screen. Awaited rather than fire-and-forget because a half-swapped robot (old group
+   * removed, new one still loading) is a frame with no robot in it.
+   */
+  async setSkin(which: 'player' | 'opponent', name: string): Promise<void> {
+    const tint = which === 'player'
+      ? COL.robot
+      : (this.alliance === 'red' ? COL.blue : COL.red);
+    const p: Puppet | null = name === 'box' ? null : await loadPuppet(name, this.robotSpec, tint);
+    const built = p ?? this.buildChassis(tint);
+    if (which === 'player') {
+      this.scene.remove(this.robotGroup);
+      this.robotGroup = built.group;
+      this.turretGroup = built.turret;
+      this.hoodMesh = built.hood;
+      this.flywheelMesh = built.flywheel;
+      this.intakeRoller = built.roller;
+      this.wheelMeshes = built.wheels;
+      this.playerSkin = name;
+      this.scene.add(built.group);
+      return;
+    }
+    if (this.opponentGroup) this.scene.remove(this.opponentGroup);
+    this.opponentGroup = built.group;
+    this.opponentTurret = built.turret;
+    this.opponentHood = built.hood;
+    this.opponentFlywheel = built.flywheel;
+    this.opponentWheels = built.wheels;
+    this.opponentRoller = built.roller;
+    this.opponentSkin = name;
+    this.scene.add(built.group);
+  }
+
   // ---------------------------------------------------------------- update
 
   update(s: Snapshot, aim: Vec3 | null, traj: Vec3[] | null): void {
@@ -1397,6 +1443,13 @@ export class Scene {
       // spinning wheel say it is about to shoot, which a turret stick never could.
       if (this.opponentHood) this.opponentHood.rotation.x = -o.hood.angleDeg * DEG;
       if (this.opponentFlywheel) this.opponentFlywheel.rotation.x -= o.flywheel.rpm * 0.0008;
+      // A CAD opponent has real wheels and a real roller; the box has neither. Same fields
+      // drive both, so an opponent reads exactly like your own robot does.
+      o.wheels?.forEach((w, i) => {
+        const hub = this.opponentWheels[i];
+        if (hub) hub.rotation.x += w.omega / 60;
+      });
+      if (this.opponentRoller) this.opponentRoller.rotation.x += (o.intake?.omega ?? 0) * SPIN_SHOWN / 60;
     } else if (this.opponentGroup) {
       this.opponentGroup.visible = false;
     }

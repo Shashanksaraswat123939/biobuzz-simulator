@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CAD preview</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d1117; }
+    canvas { display: block; }
+    #label { position: fixed; left: 12px; top: 10px; color: #c9d4e4; font: 13px ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <div id="label"></div>
+  <script type="module">
+    // A LOOK AT A CONVERTED STEP, and nothing else. tools/cad2robot.py writes a .glb per robot
+    // and the only way to know whether the conversion kept the shape is to look at it. Not part
+    // of the app: the app's own scene is packages/render/src/scene.ts.
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+    const url = new URLSearchParams(location.search).get('m') ?? '/assets/field.glb';
+    const yaw = Number(new URLSearchParams(location.search).get('yaw') ?? 35);
+    document.getElementById('label').textContent = url;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    // SIZE IT EVERY FRAME. The pane can lay this page out at 0 x 0 before it is shown, and a
+    // renderer sized once at load then stays 0 x 0 for good -- a black canvas that looks
+    // exactly like a failed conversion.
+    const fit = () => {
+      const w = innerWidth || document.body.clientWidth || 960;
+      const h = innerHeight || document.body.clientHeight || 540;
+      const px = Math.min(2, devicePixelRatio || 1);
+      if (renderer.domElement.width !== Math.round(w * px) || renderer.domElement.height !== Math.round(h * px)) {
+        renderer.setSize(w, h);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+    };
+    renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+    document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0d1117);
+    scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x2a3240, 2.2));
+    const key = new THREE.DirectionalLight(0xffffff, 2.0);
+    key.position.set(1.4, 2.2, 1.0);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x93b7ff, 1.1);
+    rim.position.set(-1.6, 0.9, -1.3);
+    scene.add(rim);
+    const camera = new THREE.PerspectiveCamera(35, 16 / 9, 0.01, 100);
+
+    new GLTFLoader().load(url, (g) => {
+      const root = g.scene;
+      scene.add(root);
+      const box = new THREE.Box3().setFromObject(root);
+      const size = box.getSize(new THREE.Vector3());
+      const mid = box.getCenter(new THREE.Vector3());
+      root.position.sub(mid);                       // centre it on the origin
+      const r = Math.max(size.x, size.y, size.z);
+      const a = (yaw * Math.PI) / 180;
+      camera.position.set(Math.sin(a) * r * 1.9, r * 1.15, Math.cos(a) * r * 1.9);
+      camera.lookAt(0, 0, 0);
+      const grid = new THREE.GridHelper(r * 3, 12, 0x2b3440, 0x1b222c);
+      grid.position.y = -size.y / 2;
+      scene.add(grid);
+      document.getElementById('label').textContent =
+        `${url}   ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)} m`;
+      // A LOOP, not one render: a single frame drawn before the material compiles shows an
+      // empty canvas, which reads as a failed conversion when the mesh is fine.
+      const tick = () => { requestAnimationFrame(tick); fit(); renderer.render(scene, camera); };
+      tick();
+      document.title = 'ready';
+    });
+  </script>
+</body>
+</html>

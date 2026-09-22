@@ -967,6 +967,8 @@ const DECK: Record<Mode, Action[]> = {
     { label: 'Opponent', title: 'Put a real robot on the other alliance and play against it. It collects, lines up on its own CELL’s opening, fires through the same readiness gate you do, tips its own HIVE and PARKs at the buzzer — driving a real chassis through a real brain, so nothing it does is something you could not. Toggling it rebuilds the match.', run: () => { opponentOn = !opponentOn; build(); }, on: () => opponentOn },
     { label: 'Empty hopper', title: 'Practice aid: set down everything the robot is carrying, on the tiles behind it so the intake does not swallow it again on the next frame. The balls stay IN PLAY rather than being deleted — 40 POLLEN is a fixed budget and the HIVE only tips when enough of them are in a CELL, so a button that ate four would change the game and not just the robot.', run: () => emptyHopper() },
     { label: 'Auto-fill hopper', title: 'Practice aid, not a game rule: quietly picks up the nearest POLLEN off the floor whenever the hopper has room, so you can work on aiming without driving a collection lap.', run: () => setAutoLoad(!autoLoad), on: () => autoLoad },
+    { label: 'Robot: box', title: 'Which robot YOU are driving, on screen. Cycles through every assets/robot-*.glb that tools/cad2robot.py has converted from a team’s STEP, and back to the procedural box this simulator was built around. It is a SKIN: the physics is the one chassis config/robot.json describes, whatever is drawn over it. The wheels, intake roller, flywheel and hood of a converted robot are separate meshes and turn on the same numbers the box’s do; a robot whose CAD has no turret gets no turret, because none of these have one.', run: () => cycleSkin('player') },
+    { label: 'Rival: box', title: 'The same, for the opponent. Wearing a different CAD from yours is the point: two identical grey robots on one field cannot be told apart at a glance while driving.', run: () => cycleSkin('opponent') },
     { label: 'Joystick', title: 'On-screen sticks: left translates, right looks around. They feed the same gamepad frame the keyboard and a real controller do, so a phone or a trackpad can drive without either.', run: () => (sticks.visible = !sticks.visible), on: () => sticks.visible },
     { label: 'Shot zone', title: 'Green where a perfectly aimed shot clears the land-probability gate, red where it does not, using the hood and rpm the table commands at that range and the CELL mouth as seen from that spot. A MODEL map (tools/shotzone.ts), not a record of what this robot has hit.', run: () => (scene.showShotZone = !scene.showShotZone), on: () => scene.showShotZone },
     { label: 'Patrol zone', title: 'The wedge either side of the up CELL’s opening that the driver should stay inside — robot.json shot.patrolHalfAngle_deg, adjustable in Variables. It is NOT the fire gate (turret.fireOpenCap_deg, 60 deg, wider): this is where a shot is worth TAKING rather than where one is allowed. With every gate lifted, 260 shots land 94% at 0-20 deg off the opening, 100% at 20-35, 89% at 35-50 and 8% at 50-65 — the far edge is where the mouth is half shut AND where the robot is reversing, because the extreme bearing is the end of a pass.', run: () => (scene.showPatrolSector = !scene.showPatrolSector), on: () => scene.showPatrolSector },
@@ -1001,6 +1003,8 @@ const DECK: Record<Mode, Action[]> = {
     { label: 'Belief', title: 'A VIOLET ring where the robot THINKS the up CELL mouth is, beside the orange one at where it actually is. Built from the robot’s own estimate only: the fused pose — odometry with tag corrections — plus the target range and bearing it is aiming with. The distance between the two rings is the localisation error, to scale, instead of two numbers in a panel to subtract.', run: () => (scene.showBelief = !scene.showBelief), on: () => scene.showBelief },
     { label: 'Sight line', title: 'The ray the tag pipeline is trying to decode along, from the AprilTag panel on the up CELL to the camera. GREEN while it is decoding, RED while the geometry refuses -- out of range, too far round the side, or the rocker mid-swing. It is drawn from the robot’s tracked point at muzzle height because that is where the model puts the camera: there is no mount offset yet.', run: () => (scene.showSightLine = !scene.showSightLine), on: () => scene.showSightLine },
     { label: 'Colliders', title: 'Show the convex shapes the solver actually collides with, instead of the CAD skin drawn over them.', run: () => (scene.showColliders = !scene.showColliders), on: () => scene.showColliders },
+    { label: 'Robot: box', title: 'Which robot YOU are driving, on screen. Cycles through every assets/robot-*.glb that tools/cad2robot.py has converted from a team’s STEP, and back to the procedural box this simulator was built around. It is a SKIN: the physics is the one chassis config/robot.json describes, whatever is drawn over it. The wheels, intake roller, flywheel and hood of a converted robot are separate meshes and turn on the same numbers the box’s do; a robot whose CAD has no turret gets no turret, because none of these have one.', run: () => cycleSkin('player') },
+    { label: 'Rival: box', title: 'The same, for the opponent. Wearing a different CAD from yours is the point: two identical grey robots on one field cannot be told apart at a glance while driving.', run: () => cycleSkin('opponent') },
     { label: 'Joystick', title: 'On-screen sticks: left translates, right looks around. They feed the same gamepad frame the keyboard and a real controller do, so a phone or a trackpad can drive without either.', run: () => (sticks.visible = !sticks.visible), on: () => sticks.visible },
     { label: 'Shot zone', title: 'Green where a perfectly aimed shot clears the land-probability gate, red where it does not, using the hood and rpm the table commands at that range and the CELL mouth as seen from that spot. A MODEL map (tools/shotzone.ts), not a record of what this robot has hit.', run: () => (scene.showShotZone = !scene.showShotZone), on: () => scene.showShotZone },
     { label: 'Patrol zone', title: 'The wedge either side of the up CELL’s opening that the driver should stay inside — robot.json shot.patrolHalfAngle_deg, adjustable in Variables. It is NOT the fire gate (turret.fireOpenCap_deg, 60 deg, wider): this is where a shot is worth TAKING rather than where one is allowed. With every gate lifted, 260 shots land 94% at 0-20 deg off the opening, 100% at 20-35, 89% at 35-50 and 8% at 50-65 — the far edge is where the mouth is half shut AND where the robot is reversing, because the extreme bearing is the end of a pass.', run: () => (scene.showPatrolSector = !scene.showPatrolSector), on: () => scene.showPatrolSector },
@@ -1009,6 +1013,22 @@ const DECK: Record<Mode, Action[]> = {
     { label: 'Reset', title: 'Rebuild the match with the current variables.', run: () => build() },
   ],
 };
+
+/**
+ * WEAR A REAL TEAM'S CAD. tools/cad2robot.py converts a robot STEP into assets/robot-<name>.glb
+ * with its wheels, intake roller, flywheel and hood as separate named meshes; the scene rigs
+ * those to the same handles the procedural robot uses, so a borrowed robot's parts turn on the
+ * same numbers yours do. 'box' is the procedural robot this simulator was built around.
+ *
+ * It CYCLES rather than opening a menu because there are a handful of skins, not a hundred,
+ * and a button you can hit while driving beats a dialog you cannot.
+ */
+function cycleSkin(which: 'player' | 'opponent'): void {
+  const list = Scene.skins();
+  const cur = which === 'player' ? scene.playerSkin : scene.opponentSkin;
+  const next = list[(list.indexOf(cur) + 1) % list.length];
+  void scene.setSkin(which, next).then(paintDeck);
+}
 
 function buildDeck(): void {
   const host = $('#deck');
@@ -1031,6 +1051,8 @@ function paintDeck(): void {
     if (a.on) b.classList.toggle('on', a.on());
     if (a.label.startsWith('Shots:')) b.textContent = `Shots: ${plan.shots}`;
     if (a.label.startsWith('Speed:')) b.textContent = `Speed: ${turbo}x`;
+    if (a.label.startsWith('Robot:')) b.textContent = `Robot: ${scene.playerSkin}`;
+    if (a.label.startsWith('Rival:')) b.textContent = `Rival: ${scene.opponentSkin}`;
   }
   const running = !!auto && auto.phase !== 'done';
   const autoRunning = !!routine && routine.phase !== 'done';

@@ -7,3 +7,9 @@ java/out-teamcode/
 # PLAN.md section 9: don't commit generated assets over a few MB -- regenerate them.
 assets/field.glb
 assets/field-index.json
+
+# Team robot CAD, generated from their STEPs by tools/cad2robot.py (4-6 MB each). The STEPs
+# themselves are 60-440 MB and are not in the repo either; regenerate from wherever they live.
+# The picker degrades to 'box' when they are absent, which is what a fresh clone sees.
+assets/robot-*.glb
+assets/robot-*-index.json
